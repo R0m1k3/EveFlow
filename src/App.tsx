@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Send, Mic, MicOff, Settings, MessageSquare, Volume2, VolumeX,
-  Sparkles, Cpu, Minimize2, X, AlertCircle, StopCircle
+  Sparkles, Cpu, Minimize2, X, AlertCircle, StopCircle, Paperclip
 } from 'lucide-react';
 import { ThreeCanvas } from './components/ThreeCanvas';
 import { AudioService } from './services/audioService';
@@ -19,7 +19,167 @@ interface Message {
   emotion?: EveEmotion;
   timestamp: Date;
   source?: 'eveflow' | 'telegram' | 'webhook';
+  images?: string[]; // base64 Data URLs pour affichage local direct
 }
+
+interface Attachment {
+  name: string;
+  type: string;
+  dataUrl: string; // base64 Data URL
+  size: number;
+}
+
+export const TTS_LONG_TEXT_THRESHOLD = 450;
+
+// Helper de compression d'image asynchrone via Canvas HTML5 (Zero Trust & Zero Dependency)
+// Réduit les payloads gigantesques (ex: 8 Mo d'un appareil photo) à environ 100-150 Ko pour fluidifier React et l'API
+const compressImage = (dataUrl: string, mimeType: string): Promise<{ dataUrl: string; size: number }> => {
+  return new Promise((resolve) => {
+    // Si ce n'est pas une image ou si c'est un SVG / GIF animé, on conserve l'original
+    if (!mimeType.startsWith('image/') || mimeType === 'image/svg+xml' || mimeType.includes('gif')) {
+      resolve({ dataUrl, size: Math.round((dataUrl.length * 3) / 4) });
+      return;
+    }
+
+    const img = new Image();
+    img.src = dataUrl;
+    img.onload = () => {
+      try {
+        const MAX_WIDTH = 1024;
+        const MAX_HEIGHT = 1024;
+        let width = img.width;
+        let height = img.height;
+
+        // Conserver le ratio hauteur/largeur
+        if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+          if (width > height) {
+            height = Math.round((height * MAX_WIDTH) / width);
+            width = MAX_WIDTH;
+          } else {
+            width = Math.round((width * MAX_HEIGHT) / height);
+            height = MAX_HEIGHT;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          // Compression en JPEG à 70% de qualité (idéal pour la vision par IA et parfait visuellement pour les miniatures)
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+          const approxSize = Math.round((compressedDataUrl.length * 3) / 4);
+          resolve({ dataUrl: compressedDataUrl, size: approxSize });
+        } else {
+          resolve({ dataUrl, size: Math.round((dataUrl.length * 3) / 4) });
+        }
+      } catch (e) {
+        console.error("Échec de la compression de l'image sélectionnée:", e);
+        resolve({ dataUrl, size: Math.round((dataUrl.length * 3) / 4) });
+      }
+    };
+    img.onerror = () => {
+      resolve({ dataUrl, size: Math.round((dataUrl.length * 3) / 4) });
+    };
+  });
+};
+
+// Composant de rendu asynchrone pour les images locales dans ReactMarkdown et la galerie
+// Gère de façon Zero Trust la distinction entre base64 local, fichier Windows, et chemin absolu du serveur distant Hermes
+const LocalImage: React.FC<{ 
+  src: string; 
+  alt?: string; 
+  agentUrl?: string; 
+  provider?: string; 
+  [key: string]: any; 
+}> = ({ src, alt, agentUrl, provider, ...props }) => {
+  const [imageSrc, setImageSrc] = useState<string>('');
+
+  useEffect(() => {
+    // 1. Si c'est une image base64 en direct (Data URL), pas de traitement IPC requis
+    if (src.startsWith('data:')) {
+      setImageSrc(src);
+      return;
+    }
+
+    // 2. Si c'est une URL HTTP/HTTPS directe complète, on l'affiche directement
+    if (src.startsWith('http://') || src.startsWith('https://')) {
+      setImageSrc(src);
+      return;
+    }
+
+    // 3. Détecter si c'est un chemin de fichier local réel sur la machine Windows de l'utilisateur
+    // Un vrai chemin local Windows commencera par file:// ou par une lettre de lecteur comme C:
+    const isWindowsLocal = src.startsWith('file://') || /^[a-zA-Z]:/.test(src);
+
+    const resolveDistantFallback = () => {
+      if (provider === 'hermes' && agentUrl) {
+        try {
+          // Nettoyer l'URL de l'agent pour obtenir la racine du serveur (ex: http://host:port)
+          const parsed = new URL(agentUrl);
+          const hostUrl = `${parsed.protocol}//${parsed.host}`;
+          
+          let relativePath = src;
+          // Nettoyer les reliquats de chemins de fichiers si présents
+          if (src.startsWith('file://')) {
+            relativePath = src.replace(/^file:\/\/\/[a-zA-Z]:/, '').replace(/^file:\/\//, '');
+          } else if (/^[a-zA-Z]:/.test(src)) {
+            relativePath = src.substring(2);
+          }
+          
+          // Remplacer les antislashs par des slashs pour l'URL HTTP
+          relativePath = relativePath.replace(/\\/g, '/');
+          
+          const resolvedUrl = `${hostUrl.replace(/\/$/, '')}/${relativePath.replace(/^\//, '')}`;
+          console.log("[LocalImage] Chemin distant résolu pour Hermes:", resolvedUrl);
+          setImageSrc(resolvedUrl);
+        } catch (urlErr) {
+          console.error("[LocalImage] Impossible de résoudre l'URL de secours distante:", urlErr);
+          setImageSrc(src);
+        }
+      } else {
+        setImageSrc(src);
+      }
+    };
+
+    if (isWindowsLocal && (window as any).electronAPI?.readLocalFile) {
+      let cleanPath = src;
+      // Retirer les préfixes de protocole file:/// ou file://
+      if (src.startsWith('file:///')) {
+        cleanPath = src.substring(8);
+      } else if (src.startsWith('file://')) {
+        cleanPath = src.substring(7);
+      }
+      
+      // Convertir les slashes pour s'adapter au système de fichiers Windows
+      cleanPath = cleanPath.replace(/\//g, '\\');
+
+      (window as any).electronAPI.readLocalFile(cleanPath)
+        .then((dataUrl: string) => {
+          setImageSrc(dataUrl);
+        })
+        .catch((err: any) => {
+          console.warn("[LocalImage] Échec de la lecture IPC locale, tentative de fallback distant:", err.message);
+          resolveDistantFallback();
+        });
+    } else {
+      // Si ce n'est pas un chemin local Windows (par exemple un chemin Unix absolu /data/jobs...), 
+      // ou si l'API Electron n'est pas présente, on résout directement à distance sans faire d'appel IPC Windows coûteux qui échouera.
+      resolveDistantFallback();
+    }
+  }, [src, agentUrl, provider]);
+
+  return (
+    <img
+      src={imageSrc || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'}
+      alt={alt || 'Visualisation'}
+      className="markdown-image"
+      {...props}
+    />
+  );
+};
+
 
 function generateUUID(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -125,6 +285,97 @@ export const App: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [currentlyPlayingMsgId, setCurrentlyPlayingMsgId] = useState<string | null>(null);
+
+  // États de télémétrie réelle (dynamique et mesurée)
+  const [realFps, setRealFps] = useState(60);
+  const [hostname, setHostname] = useState('UNRAID_HERMES');
+  const [cpuFreq, setCpuFreq] = useState(2400);
+  const [cpuTemp, setCpuTemp] = useState(36.5);
+
+  // États pour la gestion des pièces jointes (Fichiers / Images)
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Gestion de la sélection des fichiers joints (Zéro Trust validation)
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = e.target.files;
+    if (!selectedFiles) return;
+
+    const filesArray = Array.from(selectedFiles);
+    let processedCount = 0;
+
+    const checkReset = () => {
+      processedCount++;
+      if (processedCount === filesArray.length && fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    };
+
+    filesArray.forEach(file => {
+      const MAX_FILE_SIZE = 10 * 1024 * 1024;
+      if (file.size > MAX_FILE_SIZE) {
+        setErrorMessage(`Le fichier ${file.name} dépasse la limite autorisée de 10 Mo.`);
+        checkReset();
+        return;
+      }
+
+      // Déduction robuste du type MIME à partir de l'extension de fichier si l'OS renvoie une valeur vide
+      let detectedType = file.type;
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'];
+      if (ext && imageExtensions.includes(ext) && !detectedType.startsWith('image/')) {
+        detectedType = `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+      }
+
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const dataUrl = event.target?.result as string;
+        if (dataUrl) {
+          try {
+            let finalDataUrl = dataUrl;
+            let finalSize = file.size;
+
+            // Compresser l'image à la volée s'il s'agit d'un format d'image supporté
+            if (detectedType.startsWith('image/')) {
+              console.log(`[EveFlow] Compression à la volée de ${file.name}... Taille originale: ${(file.size / 1024).toFixed(1)} KB`);
+              const compressed = await compressImage(dataUrl, detectedType);
+              finalDataUrl = compressed.dataUrl;
+              finalSize = compressed.size;
+              console.log(`[EveFlow] Compression terminée pour ${file.name}. Nouvelle taille: ${(finalSize / 1024).toFixed(1)} KB`);
+            }
+
+            setAttachments(prev => [...prev, {
+              name: file.name,
+              type: detectedType,
+              dataUrl: finalDataUrl,
+              size: finalSize
+            }]);
+          } catch (compressErr) {
+            console.error(`[EveFlow] Échec de compression pour ${file.name}, utilisation de la version originale:`, compressErr);
+            setAttachments(prev => [...prev, {
+              name: file.name,
+              type: detectedType,
+              dataUrl: dataUrl,
+              size: file.size
+            }]);
+          }
+        }
+      };
+      reader.onloadend = () => {
+        checkReset();
+      };
+      reader.onerror = (err) => {
+        console.error(`Erreur de lecture du fichier ${file.name}:`, err);
+        checkReset();
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const removeAttachment = (index: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index));
+  };
 
   // Moteur 3D & Audio
   const [currentEmotion, setCurrentEmotion] = useState<EveEmotion>('neutral');
@@ -144,6 +395,7 @@ export const App: React.FC = () => {
     hermesUrl: 'http://127.0.0.1:8642/v1',
     hermesModel: 'hermes-agent',
     hermesApiKey: '',
+    hermesSessionKey: 'eveflow-user-session',
     minimaxApiKey: '',
     minimaxGroupId: '',
     minimaxModel: 'abab6.5-chat'
@@ -197,6 +449,52 @@ export const App: React.FC = () => {
     }
   });
 
+  // --- TÉLÉMÉTRIE RÉELLE SYSTÈME ET MESURE DU FPS ---
+  useEffect(() => {
+    // 1. Calcul du FPS de rendu client (via requestAnimationFrame)
+    let frameCount = 0;
+    let lastTime = performance.now();
+    let animFrameId: number;
+
+    const fpsLoop = () => {
+      frameCount++;
+      const now = performance.now();
+      if (now - lastTime >= 1000) {
+        setRealFps(Math.round((frameCount * 1000) / (now - lastTime)));
+        frameCount = 0;
+        lastTime = now;
+      }
+      animFrameId = requestAnimationFrame(fpsLoop);
+    };
+    animFrameId = requestAnimationFrame(fpsLoop);
+
+    // 2. Récupération asynchrone des métriques système réelles (IPC toutes les 2 secondes)
+    const fetchMetrics = () => {
+      if ((window as any).electronAPI?.getSystemMetrics) {
+        (window as any).electronAPI.getSystemMetrics()
+          .then((metrics: { hostname: string; cpuFreq: number; cpuTemp: number }) => {
+            if (metrics) {
+              if (metrics.hostname) setHostname(metrics.hostname);
+              if (metrics.cpuFreq) setCpuFreq(metrics.cpuFreq);
+              if (metrics.cpuTemp) setCpuTemp(metrics.cpuTemp);
+            }
+          })
+          .catch((err: any) => {
+            console.warn("[Telemetry] Échec de la récupération des métriques système:", err.message);
+          });
+      }
+    };
+
+    // Premier appel immédiat, puis polling régulier
+    fetchMetrics();
+    const intervalId = setInterval(fetchMetrics, 2000);
+
+    return () => {
+      cancelAnimationFrame(animFrameId);
+      clearInterval(intervalId);
+    };
+  }, []);
+
   // --- INITIALISATION ---
   useEffect(() => {
     const service = new AudioService();
@@ -206,7 +504,12 @@ export const App: React.FC = () => {
     persistRead('eveflow_agent_config').then(savedConfig => {
       if (savedConfig) {
         try {
-          setAgentConfig(prev => ({ ...prev, ...JSON.parse(savedConfig) }));
+          const parsed = JSON.parse(savedConfig);
+          // Si la clé de session Hermes n'existe pas encore dans la config sauvegardée, on met une valeur par défaut
+          if (!parsed.hermesSessionKey) {
+            parsed.hermesSessionKey = 'eveflow-user-session';
+          }
+          setAgentConfig(prev => ({ ...prev, ...parsed }));
         } catch (e) {
           console.error("Erreur de chargement de la configuration", e);
         }
@@ -378,20 +681,59 @@ export const App: React.FC = () => {
   };
 
   const handleSendMessage = async (text: string) => {
-    if (!text.trim() || isSending) return;
+    if (!text.trim() && attachments.length === 0) return;
+    if (isSending) return;
 
     setErrorMessage(null);
     setIsSending(true);
 
+    // Séparer les attachements : images vs documents texte
+    const images = attachments.filter(a => a.type.startsWith('image/')).map(a => a.dataUrl);
+    const textDocs = attachments.filter(a => !a.type.startsWith('image/'));
+
+    // 1. Construire le prompt textuel final (si documents texte, on extrait leur contenu)
+    let finalPrompt = text;
+    let textDocsContext = '';
+    textDocs.forEach(doc => {
+      try {
+        const base64Content = doc.dataUrl.split(',')[1];
+        // Décoder le base64 en UTF-8 proprement
+        const textContent = decodeURIComponent(
+          atob(base64Content)
+            .split('')
+            .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+            .join('')
+        );
+        const ext = doc.name.split('.').pop() || 'txt';
+        textDocsContext += `\n\n[Fichier joint : ${doc.name}]\n\`\`\`${ext}\n${textContent}\n\`\`\`\n[Fin du fichier joint : ${doc.name}]`;
+      } catch (err: any) {
+        console.error(`Échec du décodage du document ${doc.name}:`, err.message);
+      }
+    });
+
+    if (textDocsContext) {
+      finalPrompt = textDocsContext + "\n\n" + (text.trim() || "Analyse le document ci-dessus.");
+    }
+
+    // 2. Construire le contenu à afficher localement dans le chat pour l'utilisateur
+    let displayContent = text;
+    attachments.forEach(att => {
+      if (!att.type.startsWith('image/')) {
+        displayContent += `\n\n📄 **[Fichier joint : ${att.name}]**`;
+      }
+    });
+
     const userMessage: Message = {
       id: Math.random().toString(),
       role: 'user',
-      content: text,
+      content: displayContent || "Analyse des documents joints.",
+      images: images.length > 0 ? images : undefined,
       timestamp: new Date()
     };
 
     setMessages(prev => [...prev, userMessage]);
     setInputText('');
+    setAttachments([]); // Vider les pièces jointes après l'envoi
     setCurrentEmotion('thinking');
 
     try {
@@ -421,39 +763,19 @@ export const App: React.FC = () => {
         ));
       };
 
-      // TTS streaming : buffer de phrase en cours de construction
-      let sentenceBuffer = '';
-      let ttsStarted = false;
-      // Détecte fin de phrase : point, !, ?, newline — suivi d'espace ou fin de token
-      const SENTENCE_END = /([.!?…][\s"»]|[.!?…]$|\n)/;
+      // TTS streaming : désactivé au fil de l'eau pour gérer intelligemment les messages longs en fin de génération
 
       const reply = await AgentService.sendMessage(
-        text,
+        finalPrompt,
         chatHistory,
         agentConfig,
         avatarId,
         buildCallbacks(),
-        // onToken — UI rAF + TTS par phrase
+        // onToken — UI rAF (mise à jour fluide en temps réel)
         (token) => {
           fullReply += token;
           pendingContent = fullReply;
           if (rafHandle === null) rafHandle = requestAnimationFrame(flushTokens);
-
-          if (!isMuted && audioServiceRef.current) {
-            sentenceBuffer += token;
-            if (SENTENCE_END.test(sentenceBuffer)) {
-              const parts = sentenceBuffer.split(SENTENCE_END);
-              // Envoyer toutes les phrases complètes sauf le dernier fragment en cours
-              for (let i = 0; i < parts.length - 1; i++) {
-                const s = parts[i].trim();
-                if (s.length > 2) {
-                  audioServiceRef.current.queueSentence(s, selectedVoice, ttsRate);
-                  if (!ttsStarted) { setIsSpeaking(true); ttsStarted = true; }
-                }
-              }
-              sentenceBuffer = parts[parts.length - 1];
-            }
-          }
         },
         // onToolCall
         (toolName) => {
@@ -461,7 +783,12 @@ export const App: React.FC = () => {
             m.id === assistantId ? { ...m, content: m.content + `\n\n> ⚙️ *${toolName}*\n\n` } : m
           ));
         },
-        hermesSessionId || undefined
+        hermesSessionId || undefined,
+        (newSessionId) => {
+          setHermesSessionId(newSessionId);
+          persistWrite('eveflow_hermes_session_id', newSessionId);
+        },
+        images
       );
       if (rafHandle !== null) cancelAnimationFrame(rafHandle);
 
@@ -473,28 +800,37 @@ export const App: React.FC = () => {
         m.id === assistantId ? { ...m, content: reply, emotion: deducedEmotion } : m
       ));
 
-      // Lire le fragment restant après la dernière ponctuation (si non muet)
+      // Synthèse vocale de fin de message intelligente (Zero Trust & asynchrone)
       if (!isMuted && audioServiceRef.current) {
-        const tail = sentenceBuffer.trim();
-        if (tail.length > 2) {
-          audioServiceRef.current.queueSentence(tail, selectedVoice, ttsRate);
-          if (!ttsStarted) { setIsSpeaking(true); ttsStarted = true; }
-        }
-        // Si pas de streaming (réponse non-streamed), lecture normale
-        if (!ttsStarted) {
-          setIsSpeaking(true);
-          audioServiceRef.current.speak(reply, selectedVoice, ttsRate)
-            .then(() => { setIsSpeaking(false); setCurrentEmotion('neutral'); })
-            .catch(() => setIsSpeaking(false));
-        } else {
-          // Attendre la fin de la file TTS via polling léger
-          const waitTTS = setInterval(() => {
-            if (!audioServiceRef.current?.ttsSynth.speaking) {
-              clearInterval(waitTTS);
+        setIsSpeaking(true);
+        
+        if (reply.length >= TTS_LONG_TEXT_THRESHOLD) {
+          // Si le texte est long, l'agent génère une description courte par IA en arrière-plan
+          setCurrentEmotion('thinking');
+          generateLongMessageSummary(reply)
+            .then((shortDescription) => {
+              setCurrentEmotion(deducedEmotion);
+              return audioServiceRef.current!.speak(shortDescription, selectedVoice, ttsRate);
+            })
+            .then(() => {
               setIsSpeaking(false);
               setCurrentEmotion('neutral');
-            }
-          }, 300);
+            })
+            .catch(() => {
+              setIsSpeaking(false);
+              setCurrentEmotion('neutral');
+            });
+        } else {
+          // Si le texte est court, lecture intégrale directe
+          audioServiceRef.current.speak(reply, selectedVoice, ttsRate)
+            .then(() => {
+              setIsSpeaking(false);
+              setCurrentEmotion('neutral');
+            })
+            .catch(() => {
+              setIsSpeaking(false);
+              setCurrentEmotion('neutral');
+            });
         }
       }
 
@@ -552,6 +888,63 @@ export const App: React.FC = () => {
     }
     setIsSpeaking(false);
     setCurrentEmotion('neutral');
+  };
+
+  const generateLongMessageSummary = async (text: string): Promise<string> => {
+    const prompt = `Fais une description orale très courte (une seule phrase simple de maximum 12 mots) pour annoncer et résumer le texte suivant de manière agréable. Parle obligatoirement à la première personne en tant qu'assistant de l'utilisateur (ex: "Voici mon rapport de sécurité..." ou "Voici mon analyse géométrique...").\n\nTexte :\n${text}`;
+    try {
+      // Appel asynchrone direct et ultra-rapide sans historique pour le résumé
+      const result = await AgentService.sendMessage(
+        prompt,
+        [],
+        agentConfig,
+        avatarId,
+        buildCallbacks()
+      );
+      
+      // Nettoyer la réponse des guillemets superflus
+      return result.replace(/^["']|["']$/g, '').trim();
+    } catch (err) {
+      console.warn("[TTS] Échec de la description vocale IA, utilisation du fallback statique:", err);
+      const wordCount = text.split(/\s+/).filter(Boolean).length;
+      return `Voici ma transmission contenant environ ${wordCount} mots. Vous pouvez lancer son écoute audio complète à l'aide du bouton de lecture au bas du message.`;
+    }
+  };
+
+  const handlePlayLongMessage = (messageId: string, content: string) => {
+    if (!audioServiceRef.current) return;
+
+    if (currentlyPlayingMsgId === messageId) {
+      // Arrêt si on reclique sur le bouton de lecture en cours
+      audioServiceRef.current.flushQueue();
+      audioServiceRef.current.stopSpeaking();
+      setCurrentlyPlayingMsgId(null);
+      setIsSpeaking(false);
+      setCurrentEmotion('neutral');
+    } else {
+      // Arrêt de toute lecture en cours et démarrage de la lecture intégrale
+      audioServiceRef.current.flushQueue();
+      audioServiceRef.current.stopSpeaking();
+      
+      setCurrentlyPlayingMsgId(messageId);
+      setIsSpeaking(true);
+      
+      const deducedEmotion = EmotionService.analyzeSentiment(content);
+      setCurrentEmotion(deducedEmotion);
+
+      audioServiceRef.current.speak(content, selectedVoice, ttsRate)
+        .then(() => {
+          setCurrentlyPlayingMsgId(null);
+          setIsSpeaking(false);
+          setCurrentEmotion('neutral');
+        })
+        .catch((err) => {
+          console.error("[TTS] Échec de la lecture audio complète :", err);
+          setCurrentlyPlayingMsgId(null);
+          setIsSpeaking(false);
+          setCurrentEmotion('neutral');
+        });
+    }
   };
 
   const handleLoadMinimaxModels = async () => {
@@ -704,9 +1097,85 @@ export const App: React.FC = () => {
                       </div>
                     )}
                     <div className="markdown-content">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      <ReactMarkdown 
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          img: ({ node, ...props }) => (
+                            <LocalImage 
+                              src={props.src || ''} 
+                              alt={props.alt} 
+                              agentUrl={agentConfig.hermesUrl} 
+                              provider={agentConfig.provider} 
+                            />
+                          ),
+                          a: ({ node, ...props }) => {
+                            const isLocal = props.href?.startsWith('file://') || /^[a-zA-Z]:/.test(props.href || '');
+                            if (isLocal) {
+                              return (
+                                <a 
+                                  href="#" 
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    let cleanPath = props.href || '';
+                                    if (cleanPath.startsWith('file:///')) {
+                                      cleanPath = cleanPath.substring(8);
+                                    } else if (cleanPath.startsWith('file://')) {
+                                      cleanPath = cleanPath.substring(7);
+                                    }
+                                    cleanPath = cleanPath.replace(/\//g, '\\');
+                                    (window as any).electronAPI?.openLocalFile?.(cleanPath)
+                                      .catch((err: any) => console.error("Impossible d'ouvrir le fichier :", err));
+                                  }}
+                                  className="markdown-link-local"
+                                  style={{ color: 'var(--text-neon)', textDecoration: 'underline', fontWeight: 'bold' }}
+                                  title={`Ouvrir le fichier local : ${props.href}`}
+                                >
+                                  {props.children}
+                                </a>
+                              );
+                            }
+                            return <a href={props.href} target="_blank" rel="noopener noreferrer">{props.children}</a>;
+                          }
+                        }}
+                      >
                         {msg.content}
                       </ReactMarkdown>
+
+                      {msg.images && msg.images.length > 0 && (
+                        <div className="message-images-gallery" style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          {msg.images.map((imgUrl, i) => (
+                            <LocalImage 
+                              key={i} 
+                              src={imgUrl} 
+                              alt="Image jointe" 
+                              agentUrl={agentConfig.hermesUrl} 
+                              provider={agentConfig.provider} 
+                            />
+                          ))}
+                        </div>
+                      )}
+
+                      {msg.role === 'assistant' && msg.content.length >= TTS_LONG_TEXT_THRESHOLD && (
+                        <div className="long-message-audio-controls">
+                          <button
+                            onClick={() => handlePlayLongMessage(msg.id, msg.content)}
+                            className={`audio-control-btn ${currentlyPlayingMsgId === msg.id ? 'playing' : ''}`}
+                            title={currentlyPlayingMsgId === msg.id ? "Arrêter la lecture vocale complète" : "Écouter la lecture vocale complète"}
+                          >
+                            {currentlyPlayingMsgId === msg.id ? (
+                              <>
+                                <VolumeX style={{ width: '13px', height: '13px' }} />
+                                <span>[ STOP_AUDIO ]</span>
+                              </>
+                            ) : (
+                              <>
+                                <Volume2 style={{ width: '13px', height: '13px' }} />
+                                <span>[ LIRE_MESSAGE_COMPLET ]</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
                     </div>
                     <span className="message-time">
                       {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -732,14 +1201,48 @@ export const App: React.FC = () => {
 
             {/* Diagnostic Console Bar Retro-Futuriste Space Age */}
             <div className="diagnostic-bar" style={{ display: 'flex', gap: '16px', padding: '8px 16px', backgroundColor: 'var(--bg-secondary)', borderTop: '3px solid var(--text-primary)', fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', fontWeight: 'bold', letterSpacing: '1px' }}>
-              <span>&gt;&gt;&gt; HOST: UNRAID_HERMES // LIVE</span>
-              <span className="diag-item-secondary">// FREQ: 742.8 MHz</span>
+              <span>&gt;&gt;&gt; HOST: {hostname} // LIVE</span>
+              <span className="diag-item-secondary">// FREQ: {cpuFreq} MHz</span>
               <span className="diag-item-secondary">// TRANSCEIVER: ACTIVE</span>
-              <span className="diag-item-temp" style={{ marginLeft: 'auto' }}>TEMP: 34.6°C // FPS: 60</span>
+              <span className="diag-item-temp" style={{ marginLeft: 'auto' }}>TEMP: {cpuTemp}°C // FPS: {realFps}</span>
             </div>
+
+            {/* Aperçu des pièces jointes */}
+            {attachments.length > 0 && (
+              <div className="attachments-preview">
+                {attachments.map((att, idx) => (
+                  <div key={idx} className="attachment-preview-card">
+                    {att.type.startsWith('image/') ? (
+                      <img src={att.dataUrl} alt={att.name} className="attachment-preview-thumbnail" />
+                    ) : (
+                      <span className="attachment-preview-icon">📄</span>
+                    )}
+                    <div className="attachment-preview-details">
+                      <span className="attachment-preview-name">{att.name}</span>
+                      <span className="attachment-preview-size">{(att.size / 1024).toFixed(1)} KB</span>
+                    </div>
+                    <button 
+                      onClick={() => removeAttachment(idx)} 
+                      className="attachment-preview-remove"
+                      title="Supprimer la pièce jointe"
+                    >
+                      <X style={{ width: '12px', height: '12px' }} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Input Bar */}
             <div className="input-container">
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileChange} 
+                style={{ display: 'none' }} 
+                multiple 
+              />
+
               <input
                 type="text"
                 value={inputText}
@@ -770,6 +1273,22 @@ export const App: React.FC = () => {
               )}
 
               <button
+                onClick={() => fileInputRef.current?.click()}
+                className="glow-input"
+                style={{
+                  padding: '12px',
+                  width: 'auto',
+                  cursor: 'pointer',
+                  borderColor: attachments.length > 0 ? 'var(--accent-cyan)' : 'var(--text-primary)',
+                  backgroundColor: attachments.length > 0 ? 'var(--accent-light)' : 'var(--bg-secondary)',
+                  flexShrink: 0
+                }}
+                title="Ajouter des pièces jointes (Images, Fichiers texte...)"
+              >
+                <Paperclip style={{ width: '18px', height: '18px', color: attachments.length > 0 ? 'var(--accent-cyan)' : 'var(--text-primary)' }} />
+              </button>
+
+              <button
                 onClick={isListening ? handleStopListening : handleStartVocalRecord}
                 className="glow-input"
                 style={{
@@ -786,7 +1305,7 @@ export const App: React.FC = () => {
 
               <button
                 onClick={() => handleSendMessage(inputText)}
-                disabled={!inputText.trim() || isSending}
+                disabled={(!inputText.trim() && attachments.length === 0) || isSending}
                 className="neon-btn"
               >
                 <Send style={{ width: '14px', height: '14px' }} />
@@ -950,6 +1469,20 @@ export const App: React.FC = () => {
                         placeholder="Bearer token (API_SERVER_KEY)"
                       />
                     </div>
+                  </div>
+                  <div>
+                    <label className="label-title">Clé de Session (Mémoire stable à long terme)</label>
+                    <input 
+                      type="text" 
+                      value={agentConfig.hermesSessionKey}
+                      onChange={(e) => saveConfig({ ...agentConfig, hermesSessionKey: e.target.value })}
+                      className="glow-input"
+                      style={{ padding: '8px 12px', fontSize: '12px' }}
+                      placeholder="Ex: eveflow-user-session"
+                    />
+                    <span style={{ display: 'block', marginTop: '5px', fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                      ℹ️ Cette clé associe EveFlow à vos fichiers de mémoire persistante (<code>USER.md</code> et <code>MEMORY.md</code>) sur votre hôte <code>UNRAID_HERMES</code>.
+                    </span>
                   </div>
                 </div>
               )}

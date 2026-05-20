@@ -45,18 +45,46 @@ export class AudioService {
   }
 
   private _cleanForTTS(raw: string): string {
-    return raw
+    // 1. Extraire le texte des liens Markdown [Texte](url). Gère aussi les parenthèses dans les URLs
+    let cleaned = raw.replace(/\[([^\]]+)\]\((?:[^)(]+|\([^)(]*\))*\)/g, '$1');
+
+    // 2. Supprimer toutes les URLs nues (http, https, ftp, file) complexes ou simples
+    cleaned = cleaned.replace(/(?:https?|ftp|file):\/\/\S+/gi, '');
+
+    // 3. Supprimer les adresses commençant par www.
+    cleaned = cleaned.replace(/www\.\S+/gi, '');
+
+    // 4. Supprimer tout mot technique contenant des chemins de fichiers, adresses IP ou segments techniques
+    // (ex: C:\chemin, localhost:8080, v1/chat/completions)
+    const words = cleaned.split(/\s+/);
+    cleaned = words
+      .filter(word => {
+        // Exclure les mots qui ressemblent à des chemins ou contiennent des slashes / backslashes
+        if (word.includes('/') || word.includes('\\')) {
+          return false;
+        }
+        // Exclure les hôtes avec port (ex: localhost:8080, 127.0.0.1:8642)
+        if (/(?:[a-zA-Z0-9-]+\.[a-zA-Z]{2,6}|localhost|[\d.]+):\d+/.test(word)) {
+          return false;
+        }
+        // Exclure les adresses IP nues
+        if (/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(word)) {
+          return false;
+        }
+        return true;
+      })
+      .join(' ');
+
+    return cleaned
       // Emojis et symboles Unicode
       .replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FEFF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA9F}]/gu, '')
-      // Markdown : **, *, _, __, #, `, ~
+      // Markdown restant : **, *, _, __, #, `, ~
       .replace(/(\*\*|__|~~|[*_#`~])/g, '')
-      // Liens markdown [texte](url) → garder le texte
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-      // Balises techniques [⚙️ Exécution: ...] et similaires
+      // Balises techniques résiduelles [⚙️ Exécution...]
       .replace(/\[[^\]]*\]/g, '')
       // Ponctuation répétée ou décorative : ---, ===, ~~~, ...
       .replace(/(-{2,}|={2,}|~{2,}|\.{2,})/g, ' ')
-      // Caractères non lisibles restants
+      // Caractères techniques restants non lisibles
       .replace(/[<>{}|\\^]/g, '')
       // Espaces multiples
       .replace(/\s{2,}/g, ' ')
@@ -90,10 +118,12 @@ export class AudioService {
   // Utilisé pour le streaming phrase par phrase (démarre l'audio dès la 1ère phrase)
   public queueSentence(text: string, voiceName?: string, rate: number = 1.0, pitch: number = 1.1): void {
     if (!this.ttsSynth) return;
-    const clean = text.replace(/[*_#`]/g, '').replace(/\[.*?\]/g, '').trim();
+    const clean = text.trim();
     if (!clean) return;
     const u = this._makeUtterance(clean, voiceName, rate, pitch);
-    this.ttsSynth.speak(u); // s'enchaîne automatiquement à la file SpeechSynthesis
+    if (u.text.trim()) {
+      this.ttsSynth.speak(u); // s'enchaîne automatiquement à la file SpeechSynthesis
+    }
   }
 
   // Vide la file TTS (fin du streaming ou interruption utilisateur)

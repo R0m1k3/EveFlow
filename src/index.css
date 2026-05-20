@@ -649,3 +649,191 @@ select.glow-input {
   }
 }
 
+/* Rendu d'images Markdown rétro-futuriste avec effet glow */
+.markdown-image {
+  max-width: 100%;
+  max-height: 380px;
+  border-radius: var(--radius-sm);
+  margin-top: 10px;
+  border: 2px solid var(--text-primary);
+  box-shadow: 0 0 15px rgba(0, 212, 245, 0.25);
+  display: block;
+  animation: fadeIn 0.4s ease-out;
+  transition: var(--transition-smooth);
+}
+
+.markdown-image:hover {
+  transform: scale(1.02);
+  box-shadow: 0 0 25px rgba(0, 212, 245, 0.45);
+  border-color: var(--accent-cyan);
+}
+
+/* --- PIÈCES JOINTES ET APERÇUS --- */
+.attachments-preview {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 24px;
+  border-top: 3px solid var(--text-primary);
+  background-color: var(--bg-primary);
+  animation: fadeIn 0.3s ease-out;
+}
+
+.attachment-preview-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background-color: var(--bg-secondary);
+  border: 1px solid rgba(0, 212, 245, 0.3);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  max-width: 260px;
+  min-width: 140px;
+  position: relative;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+  animation: fadeIn 0.2s ease-out;
+}
+
+.attachment-preview-card:hover {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 10px rgba(0, 212, 245, 0.2);
+}
+
+.attachment-preview-thumbnail {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--text-primary);
+}
+
+.attachment-preview-icon {
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background-color: var(--bg-primary);
+  border-radius: 6px;
+  border: 1px solid rgba(0, 212, 245, 0.2);
+}
+
+.attachment-preview-details {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.attachment-preview-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-body);
+}
+
+.attachment-preview-size {
+  font-size: 9px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.attachment-preview-remove {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: var(--transition-smooth);
+}
+
+.attachment-preview-remove:hover {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: #ff6b6b;
+}
+
+/* --- GALERIE D'IMAGES DANS LES BULLES DE CHAT (SPACE AGE GLOW GRID) --- */
+.message-images-gallery {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)) !important;
+  gap: 12px !important;
+  margin-top: 12px !important;
+  width: 100% !important;
+}
+
+.message-images-gallery .markdown-image {
+  width: 120px !important;
+  height: 120px !important;
+  object-fit: cover !important;
+  margin-top: 0 !important;
+  cursor: pointer !important;
+  border: 2px solid var(--text-primary) !important;
+  box-shadow: 0 0 10px rgba(0, 212, 245, 0.15) !important;
+  border-radius: var(--radius-sm) !important;
+  transition: var(--transition-smooth) !important;
+}
+
+.message-images-gallery .markdown-image:hover {
+  transform: scale(1.05) translateY(-2px) !important;
+  box-shadow: 0 0 20px rgba(0, 212, 245, 0.4) !important;
+  border-color: var(--accent-cyan) !important;
+}
+
+/* --- CONTROLES AUDIO MESSAGES LONGS (CYBERPUNK SPACE AGE) --- */
+.long-message-audio-controls {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.audio-control-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  background: var(--bg-primary);
+  color: var(--text-neon);
+  border: 1px solid rgba(0, 212, 245, 0.4);
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 0 10px rgba(0, 212, 245, 0.1);
+  transition: var(--transition-smooth);
+}
+
+.audio-control-btn:hover {
+  background: var(--accent-light);
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 15px rgba(0, 212, 245, 0.3);
+  transform: translateY(-1px);
+}
+
+.audio-control-btn:active {
+  transform: translateY(0);
+}
+
+.audio-control-btn.playing {
+  color: #ff6b6b;
+  border-color: rgba(239, 68, 68, 0.5);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.15);
+}
+
+.audio-control-btn.playing:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: #ff6b6b;
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.3);
+}
