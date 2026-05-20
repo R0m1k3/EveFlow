@@ -4,6 +4,52 @@ export interface VoiceOption {
   voice: SpeechSynthesisVoice;
 }
 
+// Dictionnaire phonétique local pour corriger la prononciation des acronymes et anglicismes en français
+const PHONETIC_DICTIONARY: Record<string, string> = {
+  'api': 'a-pé-i',
+  'cors': 'korss',
+  'svg': 'ess-vé-gé',
+  'cpu': 'cé-pé-u',
+  'fps': 'eff-pé-ess',
+  'tts': 'té-té-ess',
+  'ui': 'u-i',
+  'ai': 'a-i',
+  'ia': 'i-a',
+  'json': 'dji-zone',
+  'url': 'u-err-el',
+  'html': 'ach-té-em-el',
+  'css': 'cé-ess-ess',
+  'js': 'ji-ess',
+  'typescript': 'taïpe-skript',
+  'javascript': 'djava-skript',
+  'electron': 'élèktron',
+  'react': 'ri-akt',
+  'github': 'gitte-ub',
+  'git': 'gitte',
+  'setup': 'sétup',
+  'c++': 'cé-plus-plus',
+  'node.js': 'node-j-s',
+  'nodejs': 'node-j-s',
+  'database': 'deïta-beïss',
+  'token': 'tokène',
+  'cli': 'cé-el-i',
+  'npm': 'en-pé-em',
+  'npx': 'en-pé-ix',
+  'vite': 'vite',
+  'vscode': 'vé-ess-code',
+  'vs code': 'vé-ess-code',
+  'windows': 'windoze',
+  'macos': 'mak-os',
+  'linux': 'linux',
+  'docker': 'dokeur',
+  'cyberpunk': 'saïbeur-pounk',
+  'avatar': 'avatar',
+  'chat': 'tchat',
+  'prompt': 'prompte',
+  'welcome': 'ouel-kome',
+  'ipc': 'i-pé-cé'
+};
+
 export class AudioService {
   public ttsSynth: SpeechSynthesis;
   private recognition: any = null;
@@ -27,10 +73,52 @@ export class AudioService {
     }
   }
 
+  // Calculer un score de qualité pour trier les voix locales
+  private _getVoiceScore(v: SpeechSynthesisVoice): number {
+    const lang = v.lang.toLowerCase();
+    const name = v.name.toLowerCase();
+    
+    if (!lang.startsWith('fr')) return 0;
+    
+    let score = 100; // Base français
+    
+    if (name.includes('google') || name.includes('online')) {
+      score += 50;
+    }
+    if (name.includes('natural') || name.includes('neural')) {
+      score += 40;
+    }
+    if (name.includes('mobile')) {
+      score += 30;
+    }
+    if (name.includes('julie') || name.includes('paul')) {
+      score += 20;
+    }
+    if (name.includes('hortense')) {
+      score += 10;
+    }
+    
+    return score;
+  }
+
   // Récupérer les voix françaises et globales disponibles
   public getVoices(): VoiceOption[] {
     if (!this.ttsSynth) return [];
-    return this.ttsSynth.getVoices().map(v => ({
+    
+    const allVoices = this.ttsSynth.getVoices();
+    
+    // Trier pour mettre les meilleures voix françaises en haut
+    const sorted = [...allVoices].sort((a, b) => {
+      const scoreA = this._getVoiceScore(a);
+      const scoreB = this._getVoiceScore(b);
+      
+      if (scoreA !== scoreB) {
+        return scoreB - scoreA;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    return sorted.map(v => ({
       name: v.name,
       lang: v.lang,
       voice: v
@@ -40,34 +128,58 @@ export class AudioService {
   private _resolveVoice(voiceName?: string): SpeechSynthesisVoice | undefined {
     const voices = this.ttsSynth.getVoices();
     if (voiceName) return voices.find(v => v.name === voiceName);
-    return voices.find(v => v.lang.startsWith('fr') && v.name.toLowerCase().includes('google'))
-      || voices.find(v => v.lang.startsWith('fr'));
+    
+    const frVoices = voices.filter(v => v.lang.toLowerCase().startsWith('fr'));
+    if (frVoices.length === 0) return voices.find(v => v.lang.startsWith('en'));
+    
+    // Sélectionner la voix française locale avec le meilleur score
+    return frVoices.sort((a, b) => this._getVoiceScore(b) - this._getVoiceScore(a))[0];
+  }
+
+  private _applyPhoneticCorrections(text: string): string {
+    let corrected = text;
+    for (const [key, replacement] of Object.entries(PHONETIC_DICTIONARY)) {
+      const escapedKey = key.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      // Regex recherchant le mot technique avec des limites Unicode ou de ponctuations
+      const regex = new RegExp(`(?<=^|\\s|\\p{P})${escapedKey}(?=$|\\s|\\p{P})`, 'giu');
+      corrected = corrected.replace(regex, replacement);
+    }
+    return corrected;
   }
 
   private _cleanForTTS(raw: string): string {
-    // 1. Extraire le texte des liens Markdown [Texte](url). Gère aussi les parenthèses dans les URLs
-    let cleaned = raw.replace(/\[([^\]]+)\]\((?:[^)(]+|\([^)(]*\))*\)/g, '$1');
+    // 1. Améliorer la ponctuation Markdown pour forcer des pauses de diction naturelles
+    // Remplacer les puces de liste (ex: - item, * item) par une pause douce (virgule)
+    let formatted = raw.replace(/(?:\r?\n)\s*[-*+]\s+/g, ', ');
+    
+    // Remplacer les deux-points suivis d'un saut de ligne par un point
+    formatted = formatted.replace(/:\s*(?:\r?\n)/g, '. ');
+    
+    // Remplacer les doubles sauts de ligne par des points (pauses de paragraphes)
+    formatted = formatted.replace(/(?:\r?\n){2,}/g, '. ');
+    
+    // Remplacer les sauts de ligne simples restant par des espaces
+    formatted = formatted.replace(/(?:\r?\n)/g, ' ');
 
-    // 2. Supprimer toutes les URLs nues (http, https, ftp, file) complexes ou simples
+    // 2. Extraire le texte des liens Markdown [Texte](url)
+    let cleaned = formatted.replace(/\[([^\]]+)\]\((?:[^)(]+|\([^)(]*\))*\)/g, '$1');
+
+    // 3. Supprimer toutes les URLs nues (http, https, ftp, file)
     cleaned = cleaned.replace(/(?:https?|ftp|file):\/\/\S+/gi, '');
 
-    // 3. Supprimer les adresses commençant par www.
+    // 4. Supprimer les adresses www.
     cleaned = cleaned.replace(/www\.\S+/gi, '');
 
-    // 4. Supprimer tout mot technique contenant des chemins de fichiers, adresses IP ou segments techniques
-    // (ex: C:\chemin, localhost:8080, v1/chat/completions)
+    // 5. Filtrer les mots techniques complexes (chemins de fichiers, adresses IP)
     const words = cleaned.split(/\s+/);
     cleaned = words
       .filter(word => {
-        // Exclure les mots qui ressemblent à des chemins ou contiennent des slashes / backslashes
         if (word.includes('/') || word.includes('\\')) {
           return false;
         }
-        // Exclure les hôtes avec port (ex: localhost:8080, 127.0.0.1:8642)
         if (/(?:[a-zA-Z0-9-]+\.[a-zA-Z]{2,6}|localhost|[\d.]+):\d+/.test(word)) {
           return false;
         }
-        // Exclure les adresses IP nues
         if (/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(word)) {
           return false;
         }
@@ -75,7 +187,8 @@ export class AudioService {
       })
       .join(' ');
 
-    return cleaned
+    // 6. Nettoyer les caractères Markdown, Emojis et symboles non prononçables
+    cleaned = cleaned
       // Emojis et symboles Unicode
       .replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FEFF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA9F}]/gu, '')
       // Markdown restant : **, *, _, __, #, `, ~
@@ -89,6 +202,9 @@ export class AudioService {
       // Espaces multiples
       .replace(/\s{2,}/g, ' ')
       .trim();
+
+    // 7. Appliquer les corrections phonétiques locales
+    return this._applyPhoneticCorrections(cleaned);
   }
 
   private _makeUtterance(text: string, voiceName?: string, rate = 1.0, pitch = 1.1): SpeechSynthesisUtterance {

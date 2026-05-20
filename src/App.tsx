@@ -11,6 +11,7 @@ import { AgentService, AgentConfig, AgentProvider } from './services/agentServic
 import { EmotionService, EveAvatar, EveEmotion } from './services/emotionService';
 import { PollingService } from './services/pollingService';
 import { AppCallbacks } from './services/toolRegistry';
+import { version } from '../package.json';
 
 interface Message {
   id: string;
@@ -395,10 +396,7 @@ export const App: React.FC = () => {
     hermesUrl: 'http://127.0.0.1:8642/v1',
     hermesModel: 'hermes-agent',
     hermesApiKey: '',
-    hermesSessionKey: 'eveflow-user-session',
-    minimaxApiKey: '',
-    minimaxGroupId: '',
-    minimaxModel: 'abab6.5-chat'
+    hermesSessionKey: 'eveflow-user-session'
   });
 
   const [availableVoices, setAvailableVoices] = useState<any[]>([]);
@@ -407,19 +405,7 @@ export const App: React.FC = () => {
   const [sttLang, setSttLang] = useState<string>('fr-FR');
   const activeAvatar = AVATAR_PROFILES[avatarId];
 
-  // Minimax dynamic models states
-  const [minimaxModelsList, setMinimaxModelsList] = useState<string[]>([
-    'MiniMax-Text-01',
-    'MiniMax-M2.7',
-    'MiniMax-M2.5',
-    'MiniMax-M2.1',
-    'MiniMax-M2',
-    'MiniMax-M2-her',
-    'abab6.5-chat'
-  ]);
-  const [isLoadingMinimaxModels, setIsLoadingMinimaxModels] = useState(false);
-  const [minimaxModelsError, setMinimaxModelsError] = useState<string | null>(null);
-  const [lastLoadedMinimaxCredentials, setLastLoadedMinimaxCredentials] = useState<{ apiKey: string, groupId: string } | null>(null);
+
 
   // Session Hermes persistante — garantit la continuité mémoire/skills entre redémarrages
   const [hermesSessionId, setHermesSessionId] = useState<string>('');
@@ -570,22 +556,7 @@ export const App: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, showSettings]);
 
-  // Chargement automatique des modèles Minimax lorsque les identifiants requis sont saisis et que le fournisseur est Minimax
-  useEffect(() => {
-    const hasCredentialsChanged = !lastLoadedMinimaxCredentials || 
-      lastLoadedMinimaxCredentials.apiKey !== agentConfig.minimaxApiKey || 
-      lastLoadedMinimaxCredentials.groupId !== agentConfig.minimaxGroupId;
 
-    if (
-      agentConfig.provider === 'minimax' &&
-      agentConfig.minimaxApiKey &&
-      agentConfig.minimaxGroupId &&
-      hasCredentialsChanged &&
-      !isLoadingMinimaxModels
-    ) {
-      handleLoadMinimaxModels();
-    }
-  }, [agentConfig.provider, agentConfig.minimaxApiKey, agentConfig.minimaxGroupId, lastLoadedMinimaxCredentials]);
 
   // Polling Hermes Jobs
   useEffect(() => {
@@ -654,16 +625,7 @@ export const App: React.FC = () => {
     persistWrite('eveflow_agent_config', JSON.stringify(newConfig));
   };
 
-  const handleAvatarChange = (nextAvatarId: EveAvatar) => {
-    setAvatarId(nextAvatarId);
-    setCurrentEmotion('neutral');
-    persistWrite('eveflow_avatar_id', nextAvatarId);
 
-    setMessages(prev => {
-      const canReplaceWelcome = prev.length === 0 || (prev.length === 1 && prev[0].id === 'welcome');
-      return canReplaceWelcome ? [createWelcomeMessage(nextAvatarId)] : prev;
-    });
-  };
 
   const handleWindowControl = (action: 'minimize' | 'maximize' | 'close') => {
     if (window.electronAPI) {
@@ -947,40 +909,7 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleLoadMinimaxModels = async () => {
-    if (!agentConfig.minimaxApiKey) {
-      setMinimaxModelsError("Veuillez saisir votre clé API Minimax.");
-      return;
-    }
-    
-    setIsLoadingMinimaxModels(true);
-    setMinimaxModelsError(null);
-    
-    try {
-      const models = await AgentService.getMinimaxModels(
-        agentConfig.minimaxApiKey,
-        agentConfig.minimaxGroupId
-      );
-      if (models && models.length > 0) {
-        setMinimaxModelsList(models);
-        setLastLoadedMinimaxCredentials({
-          apiKey: agentConfig.minimaxApiKey,
-          groupId: agentConfig.minimaxGroupId
-        });
-        // Si le modèle configuré n'est pas dans la liste des modèles disponibles, on bascule vers le premier
-        if (!models.includes(agentConfig.minimaxModel)) {
-          saveConfig({ ...agentConfig, minimaxModel: models[0] });
-        }
-      } else {
-        throw new Error("Aucun modèle retourné par l'API.");
-      }
-    } catch (err: any) {
-      console.error("Échec de chargement des modèles Minimax:", err);
-      setMinimaxModelsError(err.message || "Impossible de charger les modèles.");
-    } finally {
-      setIsLoadingMinimaxModels(false);
-    }
-  };
+
 
   return (
     <div className={`app-container ${isFloatingMode ? 'transparent-bg' : ''}`}>
@@ -993,7 +922,7 @@ export const App: React.FC = () => {
             <h1 className="neon-title" style={{ fontFamily: 'var(--font-title)', letterSpacing: '2px', color: 'var(--text-primary)', fontSize: '18px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '10px', lineHeight: 1 }}>
               EVEFLOW
               <span className="header-subtitle" style={{ color: 'var(--text-secondary)', fontWeight: 500, fontSize: '14px' }}>// ANALOG SPACE OS</span>
-              <span className="sys-ready-badge" style={{ fontSize: '9px', padding: '3px 10px', backgroundColor: 'var(--accent-light)', color: 'var(--text-neon)', border: '1px solid rgba(0,212,245,0.4)', borderRadius: '20px', fontWeight: 'bold', fontFamily: 'var(--font-mono)' }}>SYS_READY_V74</span>
+              <span className="sys-ready-badge" style={{ fontSize: '9px', padding: '3px 10px', backgroundColor: 'var(--accent-light)', color: 'var(--text-neon)', border: '1px solid rgba(0,212,245,0.4)', borderRadius: '20px', fontWeight: 'bold', fontFamily: 'var(--font-mono)' }}>SYS_READY_V{version}</span>
             </h1>
           </div>
 
@@ -1332,52 +1261,7 @@ export const App: React.FC = () => {
               </button>
             </div>
 
-            {/* Avatar Selector */}
-            <div className="settings-card">
-              <h3 className="label-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Sparkles style={{ width: '14px', height: '14px' }} /> Selection d'Avatar
-              </h3>
-              <div className="grid-3">
-                {(Object.keys(AVATAR_PROFILES) as EveAvatar[]).map((id) => {
-                  const profile = AVATAR_PROFILES[id];
-                  const isActive = avatarId === id;
-                  return (
-                    <button
-                      key={id}
-                      onClick={() => handleAvatarChange(id)}
-                      className="glow-input"
-                      style={{
-                        cursor: 'pointer',
-                        minHeight: '112px',
-                        padding: '14px',
-                        textAlign: 'left',
-                        borderColor: isActive ? profile.accent : 'var(--text-primary)',
-                        backgroundColor: isActive ? 'var(--bg-glass-active)' : 'var(--bg-secondary)',
-                        boxShadow: isActive ? `0 0 18px ${profile.glow}` : 'none'
-                      }}
-                    >
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                        <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: profile.accent, boxShadow: `0 0 12px ${profile.accent}` }} />
-                        <span style={{ fontFamily: 'var(--font-title)', fontWeight: 900, fontSize: '13px', textTransform: 'uppercase' }}>{profile.name}</span>
-                      </span>
-                      <span style={{ display: 'block', fontSize: '10px', lineHeight: 1.4, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
-                        {profile.role}
-                      </span>
-                      {profile.assetPath && (
-                        <span style={{ display: 'block', marginTop: '10px', fontSize: '9px', lineHeight: 1.35, color: isActive ? profile.accent : 'var(--text-secondary)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', fontWeight: 800 }}>
-                          Asset requis: {profile.assetPath}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-              {avatarId !== 'eve' && activeAvatar.assetPath && (
-                <div style={{ marginTop: '12px', padding: '10px 12px', border: '1px solid rgba(0,212,245,0.2)', borderRadius: 'var(--radius-sm)', backgroundColor: 'rgba(0,212,245,0.06)', fontSize: '10px', lineHeight: 1.45, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
-                  Si le fichier GLB premium est absent, EveFlow utilise Eve comme fallback visuel. Installe l'asset dans {activeAvatar.assetPath} pour activer le vrai modele {activeAvatar.name}.
-                </div>
-              )}
-            </div>
+
 
             {/* A. Agents */}
             <div className="settings-card">
@@ -1386,7 +1270,7 @@ export const App: React.FC = () => {
               </h3>
               
               <div className="grid-3">
-                {(['ollama', 'hermes', 'minimax'] as AgentProvider[]).map((prov) => (
+                {(['ollama', 'hermes'] as AgentProvider[]).map((prov) => (
                   <button
                     key={prov}
                     onClick={() => saveConfig({ ...agentConfig, provider: prov })}
@@ -1487,63 +1371,7 @@ export const App: React.FC = () => {
                 </div>
               )}
 
-              {agentConfig.provider === 'minimax' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  <div>
-                    <label className="label-title">Clé API Minimax</label>
-                    <input 
-                      type="password" 
-                      value={agentConfig.minimaxApiKey}
-                      onChange={(e) => saveConfig({ ...agentConfig, minimaxApiKey: e.target.value })}
-                      className="glow-input"
-                      style={{ padding: '8px 12px', fontSize: '12px' }}
-                      placeholder="Ex: MM-..."
-                    />
-                  </div>
-                  <div className="grid-2">
-                    <div>
-                      <label className="label-title">Minimax Group ID</label>
-                      <input 
-                        type="text" 
-                        value={agentConfig.minimaxGroupId}
-                        onChange={(e) => saveConfig({ ...agentConfig, minimaxGroupId: e.target.value })}
-                        className="glow-input"
-                        style={{ padding: '8px 12px', fontSize: '12px' }}
-                        placeholder="Ex: 1234567"
-                      />
-                    </div>
-                    <div>
-                      <label className="label-title">Modèle Actuel</label>
-                      <select
-                        value={agentConfig.minimaxModel}
-                        onChange={(e) => saveConfig({ ...agentConfig, minimaxModel: e.target.value })}
-                        className="glow-input"
-                        style={{ padding: '8px 12px', fontSize: '12px', width: '100%' }}
-                      >
-                        {minimaxModelsList.map((m) => (
-                          <option key={m} value={m}>{m}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  
-                  <div style={{ marginTop: '4px' }}>
-                    <button
-                      onClick={handleLoadMinimaxModels}
-                      className="neon-btn neon-btn-secondary"
-                      style={{ width: '100%', padding: '8px 16px', fontSize: '11px', gap: '6px', cursor: 'pointer' }}
-                      disabled={isLoadingMinimaxModels}
-                    >
-                      {isLoadingMinimaxModels ? "Chargement des modèles..." : "Charger les modèles disponibles"}
-                    </button>
-                    {minimaxModelsError && (
-                      <span style={{ fontSize: '10px', color: '#ef4444', display: 'block', marginTop: '6px', fontWeight: 'bold' }}>
-                        ⚠️ {minimaxModelsError} (Utilisation des modèles par défaut)
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
+
             </div>
 
             {/* B. TTS / STT */}

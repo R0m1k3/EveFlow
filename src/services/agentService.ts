@@ -2,7 +2,7 @@ import { EveAvatar } from './emotionService';
 import { LogService } from './logService';
 import { HERMES_TOOLS, executeTool, AppCallbacks } from './toolRegistry';
 
-export type AgentProvider = 'ollama' | 'hermes' | 'minimax';
+export type AgentProvider = 'ollama' | 'hermes';
 
 export interface AgentConfig {
   provider: AgentProvider;
@@ -12,9 +12,6 @@ export interface AgentConfig {
   hermesModel: string;
   hermesApiKey: string;
   hermesSessionKey: string;
-  minimaxApiKey: string;
-  minimaxGroupId: string;
-  minimaxModel: string;
 }
 
 export class AgentService {
@@ -80,8 +77,6 @@ export class AgentService {
         return this.sendToOllama(message, updatedHistory, config.ollamaUrl, config.ollamaModel, images);
       case 'hermes':
         return this.sendToHermes(message, updatedHistory, config, callbacks, onToken, onToolCall, sessionId, onSessionIdChange, images);
-      case 'minimax':
-        return this.sendToMinimax(message, history, config, avatarId);
       default:
         throw new Error("Fournisseur d'agent non reconnu");
     }
@@ -378,107 +373,4 @@ export class AgentService {
     return fullContent || "Désolé, je n'ai pas reçu de réponse de Hermes Agent.";
   }
 
-  // ── Connecteur Minimax (API Externe) ─────────────────────────────────────
-  private static async sendToMinimax(
-    message: string,
-    history: { role: 'user' | 'assistant'; content: string }[],
-    config: AgentConfig,
-    avatarId: EveAvatar = 'eve'
-  ): Promise<string> {
-    const { minimaxApiKey, minimaxGroupId, minimaxModel } = config;
-
-    if (!minimaxApiKey) {
-      throw new Error("Clé d'API Minimax manquante dans les paramètres.");
-    }
-
-    const systemPrompt = this.getSystemPromptForAvatar(avatarId);
-    const formattedMessages = [
-      { role: 'system', content: systemPrompt },
-      ...history.map(h => ({ role: h.role, content: h.content })),
-      { role: 'user', content: message }
-    ];
-
-    const url = 'https://api.minimax.chat/v1/chat/completions';
-    const headers: Record<string, string> = {
-      'Authorization': `Bearer ${minimaxApiKey.trim()}`,
-      'Content-Type': 'application/json'
-    };
-    if (minimaxGroupId) headers['GroupId'] = minimaxGroupId.trim();
-
-    LogService.info('Minimax', `POST ${url}`, {
-      model: minimaxModel,
-      hasGroupId: !!minimaxGroupId,
-      historyLength: history.length
-    });
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ model: minimaxModel || 'abab6.5-chat', messages: formattedMessages, temperature: 0.7 })
-      });
-
-      LogService.info('Minimax', `HTTP ${response.status} ${response.statusText}`);
-
-      if (!response.ok) {
-        const rawErr = await response.text().catch(() => '(no body)');
-        LogService.error('Minimax', `Réponse non-OK`, { status: response.status, body: rawErr });
-        let errorMsg = `Erreur HTTP Minimax: ${response.status}`;
-        try { const p = JSON.parse(rawErr); errorMsg = `Minimax API Error: ${p.base_resp?.status_msg || p.error?.message || response.status}`; } catch {}
-        throw new Error(errorMsg);
-      }
-
-      const data = await response.json();
-      LogService.debug('Minimax', 'Réponse reçue', { base_resp: data.base_resp, replyPreview: data.choices?.[0]?.message?.content?.slice(0, 200) });
-
-      if (data.base_resp && data.base_resp.status_code !== 0) {
-        throw new Error(`Minimax API Error: ${data.base_resp.status_msg}`);
-      }
-
-      return data.choices?.[0]?.message?.content || "Désolé, je n'ai pas reçu de réponse de Minimax.";
-    } catch (e: any) {
-      LogService.error('Minimax', `Exception lors de la requête`, { message: e.message, stack: e.stack });
-      throw new Error(`Échec de connexion à Minimax (${e.message || e})`);
-    }
-  }
-
-  // ── Récupérer la liste des modèles Minimax ───────────────────────────────
-  public static async getMinimaxModels(apiKey: string, groupId?: string): Promise<string[]> {
-    if (!apiKey) throw new Error("Clé d'API Minimax requise pour lister les modèles.");
-
-    const url = 'https://api.minimax.chat/v1/models';
-    const headers: Record<string, string> = {
-      'Authorization': `Bearer ${apiKey.trim()}`,
-      'Content-Type': 'application/json'
-    };
-    if (groupId) headers['GroupId'] = groupId.trim();
-
-    LogService.info('Minimax', `GET ${url}`, { hasGroupId: !!groupId });
-
-    try {
-      const response = await fetch(url, { method: 'GET', headers });
-
-      LogService.info('Minimax', `GET /models → HTTP ${response.status}`);
-
-      if (!response.ok) {
-        const rawErr = await response.text().catch(() => '(no body)');
-        LogService.error('Minimax', `Erreur /models`, { status: response.status, body: rawErr });
-        let errorMsg = `Erreur HTTP Minimax (${response.status})`;
-        try { const p = JSON.parse(rawErr); errorMsg = `Minimax API Error: ${p.base_resp?.status_msg || p.error?.message || response.status}`; } catch {}
-        throw new Error(errorMsg);
-      }
-
-      const data = await response.json();
-      LogService.debug('Minimax', 'Liste modèles reçue', data);
-
-      if (data && Array.isArray(data.data))   return data.data.map((m: any) => m.id);
-      if (data && Array.isArray(data.models)) return data.models.map((m: any) => m.model_name || m.id || m);
-      if (Array.isArray(data))                return data.map((m: any) => m.id || m);
-
-      throw new Error("Format de réponse non standard");
-    } catch (e: any) {
-      LogService.error('Minimax', `Exception /models`, { message: e.message });
-      throw new Error(`Échec de récupération des modèles Minimax: ${e.message || e}`);
-    }
-  }
 }

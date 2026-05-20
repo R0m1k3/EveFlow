@@ -1,6 +1,6 @@
 {
   "name": "eveflow",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Retro-futuristic Windows companion with 3D Eve bot, local TTS/STT, and multi-agent connectivity",
   "main": "main.js",
   "scripts": {
@@ -8,7 +8,32 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "electron": "electron .",
-    "start": "concurrently -k \"npm run dev -- --host 127.0.0.1 --port 5173 --strictPort\" \"wait-on http://localhost:5173 && npm run electron\""
+    "start": "concurrently -k \"npm run dev -- --host 127.0.0.1 --port 5173 --strictPort\" \"wait-on http://localhost:5173 && npm run electron\"",
+    "dist": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.romik3.eveflow",
+    "productName": "EveFlow",
+    "copyright": "Copyright © 2026 R0m1k3",
+    "directories": {
+      "output": "out"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "dist/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "EveFlow"
+    }
   },
   "dependencies": {
     "@react-three/drei": "^9.105.0",
@@ -27,6 +52,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "concurrently": "^8.2.2",
     "electron": "^30.0.1",
+    "electron-builder": "^26.8.1",
     "typescript": "^5.4.2",
     "vite": "^5.2.2",
     "wait-on": "^7.2.0"
