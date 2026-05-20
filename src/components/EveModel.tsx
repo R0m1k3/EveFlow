@@ -138,6 +138,120 @@ const createVisorShaderMaterial = () => {
   });
 };
 
+/**
+ * Calculates local 3D vertex deformation offsets for Eve's arms based on current emotion,
+ * time, and side/height falloff coordinates.
+ */
+const getEmotionalArmOffset = (
+  side: number,
+  shoulderFalloff: number,
+  t: number,
+  emotion: EveEmotion,
+  isSpeaking: boolean
+): { dx: number; dy: number; dz: number } => {
+  let dx = 0;
+  let dy = 0;
+  let dz = 0;
+
+  // 1. Base speaking gesticulation wave
+  const talkAmp = isSpeaking ? 1.0 : 0.0;
+  // Dynamic talking wave: faster and wider
+  const talkX = talkAmp * side * Math.sin(t * 12) * 0.12 * shoulderFalloff;
+  const talkY = talkAmp * Math.abs(Math.cos(t * 12)) * 0.12 * shoulderFalloff;
+  const talkZ = talkAmp * Math.sin(t * 10 + side) * 0.08 * shoulderFalloff;
+
+  // 2. Emotional posture offset and secondary oscillations
+  switch (emotion) {
+    case 'happy': {
+      // Fast, excited bouncing and outward waving
+      const bounceX = side * (Math.sin(t * 8.5) * 0.18 + 0.1) * shoulderFalloff;
+      const bounceY = Math.abs(Math.sin(t * 13)) * 0.26 * shoulderFalloff;
+      const bounceZ = Math.sin(t * 11 + side) * 0.08 * shoulderFalloff;
+      
+      // Joyous gesticulation is fast
+      dx = bounceX + talkX * 1.3;
+      dy = bounceY + talkY * 1.3;
+      dz = bounceZ + talkZ * 1.3;
+      break;
+    }
+    case 'sad': {
+      // Heavy, lifeless drooping arms, slightly pulled in close to the body
+      const droopX = -side * 0.16 * shoulderFalloff;
+      const droopY = -0.32 * shoulderFalloff; // Sags downwards
+      const droopZ = Math.sin(t * 0.6) * 0.015 * shoulderFalloff; // Barely breathing
+      
+      // When sad, talking gesticulation is extremely muted and slow
+      dx = droopX + talkX * 0.25;
+      dy = droopY + talkY * 0.25;
+      dz = droopZ + talkZ * 0.25;
+      break;
+    }
+    case 'thinking': {
+      // Asymmetric pose: Right arm (side > 0) raised high to think/touch helmet,
+      // Left arm (side < 0) hanging restfully.
+      if (side > 0) {
+        // Right arm raised towards helmet
+        const thinkX = -side * 0.18 * shoulderFalloff; // Brought inward
+        const thinkY = (1.18 + Math.sin(t * 2.2) * 0.04) * shoulderFalloff; // High vertical reach
+        const thinkZ = (0.38 + Math.cos(t * 2.2) * 0.04) * shoulderFalloff; // Pushed forward
+        
+        dx = thinkX + talkX * 0.15; // Raised arm barely moves during speech
+        dy = thinkY + talkY * 0.15;
+        dz = thinkZ + talkZ * 0.15;
+      } else {
+        // Left arm relaxed, drifting slowly
+        const restX = -side * 0.04 * shoulderFalloff;
+        const restY = -0.12 * shoulderFalloff;
+        const restZ = Math.sin(t * 1.4) * 0.035 * shoulderFalloff;
+        
+        dx = restX + talkX * 0.8;
+        dy = restY + talkY * 0.8;
+        dz = restZ + talkZ * 0.8;
+      }
+      break;
+    }
+    case 'angry': {
+      // Rigid, tensed arms, pushed slightly outwards, high-freq anger trembling
+      const stiffX = side * 0.14 * shoulderFalloff;
+      const stiffY = -0.08 * shoulderFalloff;
+      const tremble = Math.sin(t * 28) * 0.028 * shoulderFalloff; // Furious shaking
+      const stiffZ = tremble;
+
+      // Anger talking is abrupt, stiff and aggressive
+      dx = stiffX + talkX * 0.6;
+      dy = stiffY + talkY * 0.6;
+      dz = stiffZ + talkZ * 0.6;
+      break;
+    }
+    case 'surprised': {
+      // Arms immediately thrown upwards and wide (shock reflex)
+      const shockX = side * 0.32 * shoulderFalloff;
+      const shockY = (0.42 + Math.sin(t * 16) * 0.08) * shoulderFalloff; // Fast jitter
+      const shockZ = -0.16 * shoulderFalloff; // Recoil
+
+      // Speech gesticulation is fast but overwhelmed by shock
+      dx = shockX + talkX * 0.8;
+      dy = shockY + talkY * 0.8;
+      dz = shockZ + talkZ * 0.8;
+      break;
+    }
+    case 'neutral':
+    default: {
+      // Gentle breathing floating cycle
+      const breatheX = side * Math.sin(t * 1.5) * 0.02 * shoulderFalloff;
+      const breatheY = Math.abs(Math.sin(t * 1.5)) * 0.03 * shoulderFalloff;
+      const breatheZ = Math.sin(t * 1.5 + side) * 0.03 * shoulderFalloff;
+
+      dx = breatheX + talkX;
+      dy = breatheY + talkY;
+      dz = breatheZ + talkZ;
+      break;
+    }
+  }
+
+  return { dx, dy, dz };
+};
+
 export const EveModel: React.FC<EveModelProps> = ({ emotion, isSpeaking, avatarId = 'eve' }) => {
   const modelRef = useRef<THREE.Group>(null);
   const headRef = useRef<THREE.Object3D | null>(null);
@@ -438,11 +552,11 @@ export const EveModel: React.FC<EveModelProps> = ({ emotion, isSpeaking, avatarI
     
     // Style émotionnel actuel
     const emoStyle = EmotionService.getEmotionStyle(emotion, avatarId);
-
+    
     // 1. Animation globale de flottaison (Lévitation magnétique)
     if (modelRef.current) {
-      // Oscillation en hauteur stabilisée autour de y = -0.3
-      modelRef.current.position.y = Math.sin(t * 1.5) * 0.06 - 0.3;
+      // Oscillation en hauteur stabilisée autour de y = 0.22 (remonté pour un centrage élégant)
+      modelRef.current.position.y = Math.sin(t * 1.5) * 0.06 + 0.22;
       // Légère rotation sur elle-même (mouvement de veille)
       modelRef.current.rotation.y = Math.sin(t * 0.5) * 0.05;
     }
@@ -458,25 +572,39 @@ export const EveModel: React.FC<EveModelProps> = ({ emotion, isSpeaking, avatarI
       const mouseX = state.pointer.x * 0.25;
       const mouseY = state.pointer.y * 0.2;
       
-      const targetRotY = THREE.MathUtils.lerp(headGroupRef.current.rotation.y, mouseX, 0.1);
+      let targetRotY = THREE.MathUtils.lerp(headGroupRef.current.rotation.y, mouseX, 0.1);
       let targetRotX = THREE.MathUtils.lerp(headGroupRef.current.rotation.x, -mouseY + 0.05, 0.1);
       let targetRotZ = 0;
+      let headZOffset = 0;
 
-      // Inclinaisons émotionnelles
+      // Inclinaisons émotionnelles ultra-expressives
       if (emotion === 'sad') {
-        // Tête baissée et légèrement inclinée
-        targetRotX = THREE.MathUtils.lerp(targetRotX, 0.2, 0.1);
-        targetRotZ = THREE.MathUtils.lerp(headGroupRef.current.rotation.z, 0.05, 0.1);
+        // Tête très baissée et abattue
+        targetRotX = THREE.MathUtils.lerp(targetRotX, 0.35, 0.1);
+        targetRotZ = THREE.MathUtils.lerp(headGroupRef.current.rotation.z, 0.12, 0.1);
+        headY -= 0.02; // Tête enfoncée dans les épaules
       } else if (emotion === 'thinking') {
         // Tête inclinée sur le côté (curieuse) ET léger balancement pendulaire (swaying)
-        // L'inclinaison de base est à -0.15, et on fait osciller doucement autour de ça
         const sway = Math.sin(t * 3.5) * 0.04;
-        targetRotZ = THREE.MathUtils.lerp(headGroupRef.current.rotation.z, -0.16 + sway, 0.1);
-        // Micro-mouvements de tête (hochement pensif vertical léger)
+        targetRotZ = THREE.MathUtils.lerp(headGroupRef.current.rotation.z, -0.22 + sway, 0.1);
+        // Micro-mouvements de tête (hochement pensif vertical et balayage horizontal lent)
         headY += Math.sin(t * 4.5) * 0.005;
       } else if (emotion === 'angry') {
-        // Tête penchée en avant (boudeuse)
-        targetRotX = THREE.MathUtils.lerp(targetRotX, -0.1, 0.1);
+        // Tête très penchée en avant (froncée/agacée) avec micro-tremblements horizontaux
+        targetRotX = THREE.MathUtils.lerp(targetRotX, 0.22, 0.1);
+        const angerTremble = Math.sin(t * 22) * 0.015;
+        targetRotY = THREE.MathUtils.lerp(headGroupRef.current.rotation.y, mouseX + angerTremble, 0.1);
+      } else if (emotion === 'happy') {
+        // Excitation joyeuse : petits hochements de tête rapides (bobbing)
+        const joyBob = Math.sin(t * 6.5) * 0.03;
+        targetRotX = THREE.MathUtils.lerp(targetRotX, joyBob - mouseY + 0.02, 0.1);
+        targetRotZ = THREE.MathUtils.lerp(headGroupRef.current.rotation.z, Math.cos(t * 4.0) * 0.025, 0.1);
+      } else if (emotion === 'surprised') {
+        // Recul brusque de surprise de la tête et inclinaison vers le haut
+        targetRotX = THREE.MathUtils.lerp(targetRotX, -0.25 - mouseY, 0.1);
+        targetRotZ = THREE.MathUtils.lerp(headGroupRef.current.rotation.z, Math.sin(t * 10) * 0.01, 0.1);
+        headY += 0.025; // Tête étirée
+        headZOffset -= 0.05; // Recul
       } else {
         targetRotZ = THREE.MathUtils.lerp(headGroupRef.current.rotation.z, 0, 0.1);
       }
@@ -485,7 +613,7 @@ export const EveModel: React.FC<EveModelProps> = ({ emotion, isSpeaking, avatarI
       headGroupRef.current.position.set(
         headCenter.x,
         headCenter.y + headY,
-        headCenter.z
+        headCenter.z + headZOffset
       );
       headGroupRef.current.rotation.set(targetRotX, targetRotY, targetRotZ);
     }
@@ -558,12 +686,11 @@ export const EveModel: React.FC<EveModelProps> = ({ emotion, isSpeaking, avatarI
       );
     }
 
-    // 4. Animation dynamique des bras (gesticulation en parlant, flottaison magnétique subtile au repos)
+    // 4. Animation dynamique des bras (déformation vertex organique selon l'émotion et la parole)
     if (mainBodyMeshRef.current && mainBodyBasePositionsRef.current) {
       const geometry = mainBodyMeshRef.current.geometry;
       const position = geometry.getAttribute('position') as THREE.BufferAttribute;
       const base = mainBodyBasePositionsRef.current;
-      const talkWave = isSpeaking ? Math.sin(t * 10) * 0.18 : Math.sin(t * 1.4) * 0.035;
 
       for (let i = 0; i < position.count; i += 1) {
         const index = i * 3;
@@ -575,11 +702,12 @@ export const EveModel: React.FC<EveModelProps> = ({ emotion, isSpeaking, avatarI
         if (isArmRegion) {
           const side = Math.sign(baseX);
           const shoulderFalloff = THREE.MathUtils.clamp((6.25 - baseY) / 4.8, 0, 1);
+          const offset = getEmotionalArmOffset(side, shoulderFalloff, t, emotion, isSpeaking);
           position.setXYZ(
             i,
-            baseX + side * talkWave * 0.18 * shoulderFalloff,
-            baseY + Math.abs(talkWave) * 0.1 * shoulderFalloff,
-            baseZ + Math.sin(t * 8 + side) * 0.045 * shoulderFalloff
+            baseX + offset.dx,
+            baseY + offset.dy,
+            baseZ + offset.dz
           );
         } else {
           position.setXYZ(i, baseX, baseY, baseZ);
@@ -601,7 +729,6 @@ export const EveModel: React.FC<EveModelProps> = ({ emotion, isSpeaking, avatarI
 
         const geometry = mesh.geometry;
         const position = geometry.getAttribute('position') as THREE.BufferAttribute;
-        const talkWave = isSpeaking ? Math.sin(t * 10) * 0.18 : Math.sin(t * 1.4) * 0.035;
 
         for (let i = 0; i < position.count; i += 1) {
           const index = i * 3;
@@ -613,11 +740,12 @@ export const EveModel: React.FC<EveModelProps> = ({ emotion, isSpeaking, avatarI
           if (isArmRegion) {
             const side = Math.sign(baseX);
             const shoulderFalloff = THREE.MathUtils.clamp((6.25 - baseY) / 4.8, 0, 1);
+            const offset = getEmotionalArmOffset(side, shoulderFalloff, t, emotion, isSpeaking);
             position.setXYZ(
               i,
-              baseX + side * talkWave * 0.18 * shoulderFalloff,
-              baseY + Math.abs(talkWave) * 0.1 * shoulderFalloff,
-              baseZ + Math.sin(t * 8 + side) * 0.045 * shoulderFalloff
+              baseX + offset.dx,
+              baseY + offset.dy,
+              baseZ + offset.dz
             );
           } else {
             position.setXYZ(i, baseX, baseY, baseZ);
@@ -632,7 +760,7 @@ export const EveModel: React.FC<EveModelProps> = ({ emotion, isSpeaking, avatarI
   });
 
   return (
-    <group ref={modelRef} scale={1.0} position={[0, -0.3, 0]}>
+    <group ref={modelRef} scale={1.0} position={[0, 0.22, 0]}>
       <primitive object={clonedObj} />
     </group>
   );

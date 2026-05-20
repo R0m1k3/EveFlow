@@ -113,6 +113,48 @@ export const HERMES_TOOLS: ToolDefinition[] = [
         required: ['text']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'write_shared_file',
+      description: "Sauvegarde un fichier (rapport, script python, javascript, données JSON, HTML) dans le dossier partagé EveFlow de l'utilisateur Windows et lui partage un lien d'accès. Utilise cet outil chaque fois que l'utilisateur te demande de générer, d'écrire ou de sauvegarder un fichier sur son ordinateur.",
+      parameters: {
+        type: 'object',
+        properties: {
+          filename: {
+            type: 'string',
+            description: "Le nom du fichier avec son extension (ex: rapport.txt, script.py, data.json, index.html)"
+          },
+          content: {
+            type: 'string',
+            description: "Le contenu textuel intégral à écrire dans le fichier"
+          }
+        },
+        required: ['filename', 'content']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'generate_shared_image',
+      description: "Génère un schéma technique, un dessin vectoriel, ou une illustration de haute qualité au format SVG, l'enregistre sur le disque et l'affiche dans le chat. Utilise cet outil dès que l'utilisateur te demande d'afficher, de dessiner ou de générer un graphique, un diagramme ou une image.",
+      parameters: {
+        type: 'object',
+        properties: {
+          filename: {
+            type: 'string',
+            description: "Le nom du fichier SVG (ex: architecture.svg, graphique.svg)"
+          },
+          svgContent: {
+            type: 'string',
+            description: "Le code source SVG complet et valide (incluant les balises <svg>, viewBox, styles et éléments géométriques)"
+          }
+        },
+        required: ['filename', 'svgContent']
+      }
+    }
   }
 ];
 
@@ -127,12 +169,12 @@ export const HERMES_TOOLS: ToolDefinition[] = [
  * @param callbacks   - App state accessors injected from the React layer
  * @returns           - ToolResult to append to the messages array
  */
-export function executeTool(
+export async function executeTool(
   toolCallId: string,
   name: string,
   rawArgs: string,
   callbacks: AppCallbacks
-): ToolResult {
+): Promise<ToolResult> {
   let result: string;
 
   try {
@@ -163,6 +205,30 @@ export function executeTool(
         const text = String(args.text || '').slice(0, 500);
         callbacks.speak(text);
         result = JSON.stringify({ success: true, text_spoken: text });
+        break;
+      }
+
+      case 'write_shared_file': {
+        const filename = String(args.filename || '');
+        const content = String(args.content || '');
+        if ((window as any).electronAPI?.writeSharedFile) {
+          const fileUrl = await (window as any).electronAPI.writeSharedFile(filename, content, false);
+          result = JSON.stringify({ success: true, url: fileUrl, filename });
+        } else {
+          result = JSON.stringify({ error: "L'API d'écriture de fichier local n'est pas disponible (hors Electron)." });
+        }
+        break;
+      }
+
+      case 'generate_shared_image': {
+        const filename = String(args.filename || '');
+        const svgContent = String(args.svgContent || '');
+        if ((window as any).electronAPI?.writeSharedFile) {
+          const fileUrl = await (window as any).electronAPI.writeSharedFile(filename, svgContent, false);
+          result = JSON.stringify({ success: true, url: fileUrl, filename });
+        } else {
+          result = JSON.stringify({ error: "L'API de génération d'image locale n'est pas disponible." });
+        }
         break;
       }
 

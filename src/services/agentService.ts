@@ -11,6 +11,7 @@ export interface AgentConfig {
   hermesUrl: string;
   hermesModel: string;
   hermesApiKey: string;
+  hermesSessionKey: string;
   minimaxApiKey: string;
   minimaxGroupId: string;
   minimaxModel: string;
@@ -50,11 +51,14 @@ export class AgentService {
     callbacks?: AppCallbacks,
     onToken?: (token: string) => void,
     onToolCall?: (toolName: string) => void,
-    sessionId?: string
+    sessionId?: string,
+    onSessionIdChange?: (newSessionId: string) => void,
+    images?: string[]
   ): Promise<string> {
     LogService.info('AgentService', `sendMessage → provider=${config.provider} avatar=${avatarId}`, {
       messagePreview: message.slice(0, 120),
-      historyLength: history.length
+      historyLength: history.length,
+      imagesCount: images?.length || 0
     });
 
     // For Hermes: do NOT inject an avatar system prompt — let Hermes use its own
@@ -73,9 +77,9 @@ export class AgentService {
 
     switch (config.provider) {
       case 'ollama':
-        return this.sendToOllama(message, updatedHistory, config.ollamaUrl, config.ollamaModel);
+        return this.sendToOllama(message, updatedHistory, config.ollamaUrl, config.ollamaModel, images);
       case 'hermes':
-        return this.sendToHermes(message, updatedHistory, config, callbacks, onToken, onToolCall, sessionId);
+        return this.sendToHermes(message, updatedHistory, config, callbacks, onToken, onToolCall, sessionId, onSessionIdChange, images);
       case 'minimax':
         return this.sendToMinimax(message, history, config, avatarId);
       default:
@@ -88,10 +92,23 @@ export class AgentService {
     message: string,
     history: { role: 'user' | 'assistant' | 'system'; content: string }[],
     url: string,
-    model: string
+    model: string,
+    images?: string[]
   ): Promise<string> {
     const endpoint = `${url.replace(/\/$/, '')}/api/chat`;
-    const body = { model, messages: [...history, { role: 'user', content: message }], stream: false };
+    
+    // Pour Ollama local, extraire uniquement le bloc base64 de la Data URL
+    const formattedImages = images?.map(img => {
+      const parts = img.split(',');
+      return parts.length > 1 ? parts[1] : parts[0];
+    });
+
+    const userMessage: any = { role: 'user', content: message };
+    if (formattedImages && formattedImages.length > 0) {
+      userMessage.images = formattedImages;
+    }
+
+    const body = { model, messages: [...history, userMessage], stream: false };
 
     LogService.debug('Ollama', `POST ${endpoint}`, { model, historyLength: history.length });
 
@@ -127,9 +144,11 @@ export class AgentService {
     callbacks?: AppCallbacks,
     onToken?: (token: string) => void,
     onToolCall?: (toolName: string) => void,
-    sessionId?: string
+    sessionId?: string,
+    onSessionIdChange?: (newSessionId: string) => void,
+    images?: string[]
   ): Promise<string> {
-    const { hermesUrl, hermesModel, hermesApiKey } = config;
+    const { hermesUrl, hermesModel, hermesApiKey, hermesSessionKey } = config;
 
     // Smart endpoint builder
     const base = hermesUrl.replace(/\/$/, '');
@@ -146,9 +165,23 @@ export class AgentService {
     if (hermesApiKey) headers['Authorization'] = `Bearer ${hermesApiKey.trim()}`;
     // Session continuity: Hermes uses this to retrieve memory and context across turns
     if (sessionId) headers['X-Hermes-Session-Id'] = sessionId;
+    // Stable memory scoping: link this request to long-term memory (USER.md / MEMORY.md)
+    if (hermesSessionKey) headers['X-Hermes-Session-Key'] = hermesSessionKey.trim();
+
+    // Construction du format de message multimodal d'OpenAI pour Hermes Agent
+    let userContent: any = message;
+    if (images && images.length > 0) {
+      userContent = [
+        { type: 'text', text: message },
+        ...images.map(img => ({
+          type: 'image_url',
+          image_url: { url: img }
+        }))
+      ];
+    }
 
     // Build mutable message list for tool-calling loop
-    const messages: any[] = [...history, { role: 'user', content: message }];
+    const messages: any[] = [...history, { role: 'user', content: userContent }];
     const useStreaming = !!onToken;
     const useTools = !!callbacks;
 
@@ -156,7 +189,8 @@ export class AgentService {
       model: hermesModel,
       streaming: useStreaming,
       toolsEnabled: useTools,
-      historyLength: history.length
+      historyLength: history.length,
+      hasSessionKey: !!hermesSessionKey
     });
 
     // ── Tool-calling loop (max 5 iterations to prevent infinite loops) ────────
@@ -194,6 +228,13 @@ export class AgentService {
 
         LogService.info('HermesAgent', `HTTP ${response.status} [iter=${iteration}]`);
 
+        // Capture session rotation from response headers (context compression or new session)
+        const returnedSessionId = response.headers.get('x-hermes-session-id') || response.headers.get('X-Hermes-Session-Id');
+        if (returnedSessionId && onSessionIdChange && returnedSessionId !== sessionId) {
+          LogService.info('HermesAgent', `Session rotated: ${sessionId} -> ${returnedSessionId}`);
+          onSessionIdChange(returnedSessionId);
+        }
+
         if (!response.ok) {
           const rawErr = await response.text().catch(() => '(no body)');
           LogService.error('HermesAgent', `Réponse non-OK`, { status: response.status, body: rawErr });
@@ -227,7 +268,7 @@ export class AgentService {
             LogService.info('HermesAgent', `Tool call: ${toolName}`, tc.function?.arguments);
             onToolCall?.(toolName);
 
-            const result = executeTool(tc.id, toolName, tc.function?.arguments || '{}', callbacks!);
+            const result = await executeTool(tc.id, toolName, tc.function?.arguments || '{}', callbacks!);
             messages.push(result);
           }
 
@@ -313,7 +354,7 @@ export class AgentService {
               const toolName = tc.function?.name;
               LogService.info('HermesAgent', `[stream] Tool call: ${toolName}`);
               onToolCall?.(toolName);
-              const result = executeTool(tc.id, toolName, tc.function?.arguments || '{}', callbacks);
+              const result = await executeTool(tc.id, toolName, tc.function?.arguments || '{}', callbacks);
               messages.push(result);
             }
             // Re-call non-streaming to get final answer after tools
