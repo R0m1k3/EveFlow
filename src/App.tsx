@@ -2235,7 +2235,7 @@ export const App: React.FC = () => {
           )}
 
           {/* Rendu Canvas 3D */}
-          <div style={{ flex: isFloatingMode ? 'none' : 1, height: isFloatingMode ? '165px' : 'auto', width: '100%', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: isFloatingMode ? '34px' : '0' }}>
+          <div style={{ flex: isFloatingMode ? 'none' : 1, height: isFloatingMode ? '220px' : 'auto', width: '100%', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: isFloatingMode ? '34px' : '0' }}>
             <ThreeCanvas
               emotion={currentEmotion}
               isSpeaking={isSpeaking}
