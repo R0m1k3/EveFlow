@@ -241,8 +241,36 @@ body {
   animation: ambient-breathe 7s ease-in-out infinite;
 }
 
+.avatar-ambient-field::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background:
+    radial-gradient(circle at 50% 34%, rgba(138, 247, 255, 0.42) 0 2px, transparent 3px),
+    radial-gradient(circle at 38% 28%, rgba(0, 229, 255, 0.32) 0 2px, transparent 3px),
+    radial-gradient(circle at 62% 30%, rgba(0, 229, 255, 0.32) 0 2px, transparent 3px),
+    radial-gradient(circle at 32% 48%, rgba(138, 247, 255, 0.28) 0 2px, transparent 3px),
+    radial-gradient(circle at 68% 50%, rgba(138, 247, 255, 0.28) 0 2px, transparent 3px),
+    linear-gradient(32deg, transparent 36%, rgba(0, 229, 255, 0.24) 36.4%, transparent 37.2%),
+    linear-gradient(-31deg, transparent 38%, rgba(0, 229, 255, 0.22) 38.4%, transparent 39.2%),
+    linear-gradient(90deg, transparent 41%, rgba(138, 247, 255, 0.2) 41.3%, transparent 42%);
+  filter: drop-shadow(0 0 10px rgba(0, 229, 255, 0.34));
+  transform: scale(0.94);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
 .avatar-ambient-field.thinking::before {
+  background:
+    radial-gradient(circle at 50% 32%, rgba(138, 247, 255, 0.26), transparent 24%),
+    radial-gradient(circle at 50% 42%, rgba(0, 229, 255, 0.18), transparent 48%);
   animation-duration: 3.4s;
+}
+
+.avatar-ambient-field.thinking::after {
+  opacity: 0.86;
+  transform: scale(1);
+  animation: neural-grid-pulse 2.2s ease-in-out infinite;
 }
 
 .ambient-scanline {
@@ -256,6 +284,8 @@ body {
 }
 
 .avatar-ambient-field.thinking .ambient-scanline {
+  background: linear-gradient(90deg, transparent, rgba(0, 195, 255, 0.84), transparent);
+  box-shadow: 0 0 20px rgba(0, 195, 255, 0.58);
   opacity: 0.55;
   height: 4px;
 }
@@ -335,6 +365,21 @@ body {
   50% { transform: scale(1.06); opacity: 0.9; }
 }
 
+@keyframes neural-grid-pulse {
+  0%, 100% {
+    opacity: 0.58;
+    filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0.28));
+  }
+  45% {
+    opacity: 0.95;
+    filter: drop-shadow(0 0 18px rgba(138, 247, 255, 0.52));
+  }
+  70% {
+    opacity: 0.72;
+    filter: drop-shadow(0 0 12px rgba(0, 229, 255, 0.38));
+  }
+}
+
 @keyframes scanline-drift-a {
   0%, 100% { transform: translateY(-35px); }
   50% { transform: translateY(72px); }
@@ -368,7 +413,7 @@ body {
   left: clamp(14px, 12%, 90px);
   right: clamp(14px, 12%, 90px);
   bottom: clamp(50px, 11vh, 118px);
-  height: clamp(58px, 20vh, 220px);
+  height: clamp(120px, 36vh, 390px);
   min-width: 0;
   padding: clamp(5px, 1vw, 10px);
   border: 1px solid rgba(0, 229, 255, 0.62);
@@ -467,6 +512,270 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.hermes-cockpit-window {
+  height: clamp(240px, 52vh, 430px);
+  pointer-events: auto;
+}
+
+.hermes-cockpit-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 22px;
+  padding: 5px 0;
+  font-size: clamp(7px, 1.1vw, 10px);
+  font-weight: 800;
+  color: var(--text-secondary);
+  border-bottom: 1px solid rgba(0, 229, 255, 0.18);
+}
+
+.hermes-cockpit-status span:last-child {
+  margin-left: auto;
+}
+
+.tool-screen-led.offline {
+  background: #ff6b6b;
+  box-shadow: 0 0 12px #ff6b6b;
+}
+
+.tool-screen-led.syncing {
+  animation: pulse-led 1s ease-in-out infinite;
+}
+
+.hermes-cockpit-error {
+  padding: 4px 0;
+  font-size: clamp(7px, 1vw, 9px);
+  color: #ff8f8f;
+  border-bottom: 1px solid rgba(255, 107, 107, 0.22);
+}
+
+.hermes-cockpit-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 7px 0;
+}
+
+.hermes-cockpit-tabs button,
+.hermes-icon-btn {
+  min-width: 0;
+  height: 24px;
+  border: 1px solid rgba(0, 229, 255, 0.26);
+  border-radius: 6px;
+  background: rgba(0, 212, 245, 0.07);
+  color: var(--text-neon);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  position: relative;
+}
+
+.hermes-cockpit-tabs button:hover,
+.hermes-cockpit-tabs button.active,
+.hermes-icon-btn:hover,
+.hermes-icon-btn.primary {
+  border-color: rgba(138, 247, 255, 0.8);
+  background: rgba(0, 212, 245, 0.18);
+  box-shadow: 0 0 12px rgba(0, 212, 245, 0.18);
+}
+
+.hermes-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.hermes-icon-btn.danger {
+  color: #ff8f8f;
+  border-color: rgba(255, 107, 107, 0.28);
+}
+
+.hermes-tab-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #ff6b6b;
+  color: white;
+  font-size: 8px;
+  line-height: 15px;
+  font-weight: 900;
+}
+
+.hermes-cockpit-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 229, 255, 0.38) transparent;
+}
+
+.hermes-cron-panel,
+.hermes-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  height: calc(100% - 86px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.hermes-cron-editor {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid rgba(0, 229, 255, 0.22);
+}
+
+.hermes-cockpit-input,
+.hermes-cockpit-textarea {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid rgba(0, 229, 255, 0.24);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.32);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: clamp(8px, 1.1vw, 10px);
+  padding: 6px 7px;
+  outline: none;
+}
+
+.hermes-cockpit-input:focus,
+.hermes-cockpit-textarea:focus {
+  border-color: rgba(138, 247, 255, 0.75);
+  box-shadow: 0 0 10px rgba(0, 212, 245, 0.14);
+}
+
+.hermes-cockpit-textarea {
+  grid-column: 1 / 3;
+  min-height: 38px;
+  resize: vertical;
+}
+
+.hermes-cron-editor-actions {
+  grid-column: 3;
+  grid-row: 1 / 3;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hermes-jobs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.hermes-job-row,
+.hermes-run-row {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(0, 229, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(0, 212, 245, 0.055);
+  color: var(--text-primary);
+}
+
+.hermes-job-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 7px;
+  padding: 7px;
+}
+
+.hermes-job-row.failed,
+.hermes-run-row.failed {
+  border-color: rgba(255, 107, 107, 0.38);
+}
+
+.hermes-job-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hermes-job-name {
+  font-weight: 900;
+  color: var(--text-neon);
+  font-size: clamp(8px, 1.1vw, 10px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hermes-job-meta,
+.hermes-job-result {
+  font-size: clamp(7px, 1vw, 9px);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hermes-job-actions {
+  display: grid;
+  grid-template-columns: repeat(2, 24px);
+  gap: 5px;
+  align-content: start;
+}
+
+.hermes-run-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  gap: 7px;
+  align-items: center;
+  padding: 7px;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+
+.hermes-run-row.unread {
+  border-color: rgba(112, 255, 168, 0.42);
+  background: rgba(112, 255, 168, 0.055);
+}
+
+.hermes-run-status {
+  font-size: 9px;
+  font-weight: 900;
+  color: #70ffa8;
+}
+
+.hermes-run-row.failed .hermes-run-status {
+  color: #ff8f8f;
+}
+
+.hermes-run-content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hermes-run-content strong,
+.hermes-run-content span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hermes-run-content strong {
+  color: var(--text-neon);
+  font-size: clamp(8px, 1.1vw, 10px);
+}
+
+.hermes-run-content span,
+.hermes-run-time {
+  color: var(--text-secondary);
+  font-size: clamp(7px, 1vw, 9px);
 }
 
 /* Message bubbles: Capsule-shaped pilot styling */
@@ -851,7 +1160,7 @@ select.glow-input {
     left: clamp(10px, 18%, 120px);
     right: clamp(10px, 18%, 120px);
     bottom: clamp(46px, 9vh, 64px);
-    height: clamp(54px, 12vh, 104px);
+    height: clamp(96px, 22vh, 210px);
     min-width: 0;
     padding: 6px;
   }
@@ -948,7 +1257,7 @@ select.glow-input {
     left: 10px;
     right: 10px;
     bottom: clamp(42px, 8vh, 56px);
-    height: clamp(52px, 11vh, 72px);
+    height: clamp(88px, 20vh, 150px);
   }
 }
 
@@ -962,14 +1271,14 @@ select.glow-input {
 @media (max-height: 780px) {
   .tool-screen-window {
     bottom: clamp(44px, 9vh, 62px);
-    height: clamp(58px, 14vh, 112px);
+    height: clamp(96px, 24vh, 210px);
   }
 }
 
 @media (max-height: 660px) {
   .tool-screen-window {
     bottom: clamp(38px, 8vh, 52px);
-    height: clamp(48px, 13vh, 76px);
+    height: clamp(82px, 21vh, 150px);
   }
 
   .tool-screen-header {

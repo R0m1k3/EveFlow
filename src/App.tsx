@@ -3,13 +3,15 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Send, Mic, MicOff, Settings, MessageSquare, Volume2, VolumeX,
-  Sparkles, Cpu, Minimize2, X, AlertCircle, StopCircle, Paperclip
+  Sparkles, Cpu, Minimize2, X, AlertCircle, StopCircle, Paperclip,
+  CalendarClock, History, Wrench, Play, Pause, RefreshCw, Trash2, Plus,
+  CheckCircle2, WifiOff, Edit3, Save
 } from 'lucide-react';
 import { ThreeCanvas, ToolEvent } from './components/ThreeCanvas';
 import { AudioService } from './services/audioService';
 import { AgentService, AgentConfig, AgentProvider } from './services/agentService';
 import { EmotionService, EveAvatar, EveEmotion } from './services/emotionService';
-import { PollingService } from './services/pollingService';
+import { HermesJob, HermesJobDraft, PollingService } from './services/pollingService';
 import { AppCallbacks } from './services/toolRegistry';
 import { version } from '../package.json';
 
@@ -19,7 +21,7 @@ interface Message {
   content: string;
   emotion?: EveEmotion;
   timestamp: Date;
-  source?: 'eveflow' | 'telegram' | 'webhook';
+  source?: 'eveflow' | 'telegram' | 'webhook' | 'cron';
   images?: string[]; // base64 Data URLs pour affichage local direct
 }
 
@@ -28,6 +30,25 @@ interface Attachment {
   type: string;
   dataUrl: string; // base64 Data URL
   size: number;
+}
+
+type HermesCockpitTab = 'tools' | 'crons' | 'history';
+type HermesSyncState = 'idle' | 'syncing' | 'online' | 'offline';
+
+interface HermesRunRecord {
+  id: string;
+  jobId: string;
+  jobName: string;
+  status: 'succeeded' | 'failed';
+  result: string;
+  at: string;
+  read: boolean;
+}
+
+interface HermesCronCache {
+  jobs: HermesJob[];
+  runs: HermesRunRecord[];
+  lastSyncAt?: string;
 }
 
 export const TTS_LONG_TEXT_THRESHOLD = 450;
@@ -487,32 +508,245 @@ const createWelcomeMessage = (avatarId: EveAvatar): Message => ({
   timestamp: new Date()
 });
 
-const ToolMonitorWindow: React.FC<{
+const getHermesJobId = (job: HermesJob): string => job.id || String(job.job_id || job.name || Math.random());
+
+const getHermesJobStatus = (job: HermesJob): string => {
+  if (job.state) return String(job.state);
+  if (job.status) return String(job.status);
+  if (job.enabled === false) return 'paused';
+  if (job.last_status) return String(job.last_status);
+  return 'scheduled';
+};
+
+const formatHermesSchedule = (schedule: HermesJob['schedule']): string => {
+  if (!schedule) return 'non planifie';
+  if (typeof schedule === 'string') return schedule;
+  return schedule.display || schedule.expr || schedule.kind || 'schedule';
+};
+
+const getHermesJobResult = (job: HermesJob): string => (
+  job.result || job.last_result || job.output || job.last_output || job.error || job.last_error || ''
+);
+
+const getHermesJobTime = (job: HermesJob): string => (
+  job.completed_at || job.last_run_at || job.updated_at || job.created_at || new Date().toISOString()
+);
+
+const buildRunRecordFromJob = (job: HermesJob): HermesRunRecord | null => {
+  const result = getHermesJobResult(job);
+  const status = getHermesJobStatus(job).toLowerCase();
+  if (!result || (!['completed', 'failed', 'ok'].includes(status) && !job.completed_at && !job.last_run_at)) {
+    return null;
+  }
+
+  const at = getHermesJobTime(job);
+  const jobId = getHermesJobId(job);
+  return {
+    id: `${jobId}:${at}:${result.slice(0, 24)}`,
+    jobId,
+    jobName: job.name || jobId,
+    status: status === 'failed' || job.error || job.last_error ? 'failed' : 'succeeded',
+    result,
+    at,
+    read: false
+  };
+};
+
+const previewText = (value: string, max = 96): string => (
+  value.length > max ? `${value.slice(0, max - 1)}...` : value
+);
+
+const createDefaultCronDraft = (): HermesJobDraft => ({
+  name: '',
+  schedule: 'every 1h',
+  prompt: '',
+  deliver: 'local'
+});
+
+const HermesCockpitWindow: React.FC<{
   events: ToolEvent[];
   isWorking: boolean;
-}> = ({ events, isWorking }) => {
+  jobs: HermesJob[];
+  runs: HermesRunRecord[];
+  syncState: HermesSyncState;
+  syncDetail?: string;
+  lastSyncAt?: string;
+  draft: HermesJobDraft;
+  editingJobId: string | null;
+  isSaving: boolean;
+  onDraftChange: (draft: HermesJobDraft) => void;
+  onCreate: () => void;
+  onCancelEdit: () => void;
+  onStartEdit: (job: HermesJob) => void;
+  onUpdate: () => void;
+  onRefresh: () => void;
+  onPause: (job: HermesJob) => void;
+  onResume: (job: HermesJob) => void;
+  onRun: (job: HermesJob) => void;
+  onDelete: (job: HermesJob) => void;
+  onOpenRun: (run: HermesRunRecord) => void;
+}> = ({
+  events,
+  isWorking,
+  jobs,
+  runs,
+  syncState,
+  syncDetail,
+  lastSyncAt,
+  draft,
+  editingJobId,
+  isSaving,
+  onDraftChange,
+  onCreate,
+  onCancelEdit,
+  onStartEdit,
+  onUpdate,
+  onRefresh,
+  onPause,
+  onResume,
+  onRun,
+  onDelete,
+  onOpenRun
+}) => {
   const latestEvents = events.slice(-8).reverse();
+  const [activeTab, setActiveTab] = useState<HermesCockpitTab>('tools');
+  const unreadRuns = runs.filter(run => !run.read).length;
+  const hasDraft = draft.name.trim() && draft.schedule.trim() && draft.prompt.trim();
+  const canSaveDraft = !!hasDraft && !isSaving;
+
+  const renderTools = () => (
+    <div className="tool-screen-body hermes-cockpit-scroll">
+      {latestEvents.length === 0 ? (
+        <div className="tool-screen-empty">Aucun outil en cours</div>
+      ) : (
+        latestEvents.map((event) => (
+          <div key={event.id} className={`tool-screen-line ${event.status}`}>
+            <span className="tool-screen-status">{event.status.toUpperCase()}</span>
+            <span className="tool-screen-text">{event.label}</span>
+            {event.detail && <span className="tool-screen-detail">{event.detail}</span>}
+          </div>
+        ))
+      )}
+    </div>
+  );
+
+  const renderCrons = () => (
+    <div className="hermes-cron-panel hermes-cockpit-scroll">
+      <div className="hermes-cron-editor">
+        <input
+          className="hermes-cockpit-input"
+          value={draft.name}
+          onChange={(e) => onDraftChange({ ...draft, name: e.target.value })}
+          placeholder="Nom du cron"
+        />
+        <input
+          className="hermes-cockpit-input"
+          value={draft.schedule}
+          onChange={(e) => onDraftChange({ ...draft, schedule: e.target.value })}
+          placeholder="every 1h / 0 9 * * *"
+        />
+        <textarea
+          className="hermes-cockpit-textarea"
+          value={draft.prompt}
+          onChange={(e) => onDraftChange({ ...draft, prompt: e.target.value })}
+          placeholder="Mission Hermes planifiee"
+        />
+        <div className="hermes-cron-editor-actions">
+          {editingJobId && (
+            <button className="hermes-icon-btn" onClick={onCancelEdit} title="Annuler l'edition">
+              <X size={13} />
+            </button>
+          )}
+          <button
+            className="hermes-icon-btn primary"
+            onClick={editingJobId ? onUpdate : onCreate}
+            disabled={!canSaveDraft}
+            title={editingJobId ? 'Sauvegarder le cron' : 'Creer le cron'}
+          >
+            {editingJobId ? <Save size={13} /> : <Plus size={13} />}
+          </button>
+        </div>
+      </div>
+
+      <div className="hermes-jobs-list">
+        {jobs.length === 0 ? (
+          <div className="tool-screen-empty">Aucun cron Hermes synchronise</div>
+        ) : jobs.map((job) => {
+          const jobId = getHermesJobId(job);
+          const status = getHermesJobStatus(job);
+          const paused = status === 'paused' || job.enabled === false;
+          const result = getHermesJobResult(job);
+
+          return (
+            <div key={jobId} className={`hermes-job-row ${status.toLowerCase()}`}>
+              <div className="hermes-job-main">
+                <span className="hermes-job-name">{job.name || jobId}</span>
+                <span className="hermes-job-meta">
+                  {status.toUpperCase()} // {formatHermesSchedule(job.schedule)}
+                </span>
+                <span className="hermes-job-meta">
+                  NEXT {job.next_run_at ? new Date(job.next_run_at).toLocaleString() : 'inconnu'}
+                </span>
+                {result && <span className="hermes-job-result">{previewText(result)}</span>}
+              </div>
+              <div className="hermes-job-actions">
+                <button className="hermes-icon-btn" onClick={() => onRun(job)} title="Lancer maintenant"><Play size={12} /></button>
+                <button className="hermes-icon-btn" onClick={() => paused ? onResume(job) : onPause(job)} title={paused ? 'Reprendre' : 'Mettre en pause'}>
+                  {paused ? <Play size={12} /> : <Pause size={12} />}
+                </button>
+                <button className="hermes-icon-btn" onClick={() => onStartEdit(job)} title="Editer"><Edit3 size={12} /></button>
+                <button className="hermes-icon-btn danger" onClick={() => onDelete(job)} title="Supprimer"><Trash2 size={12} /></button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const renderHistory = () => (
+    <div className="hermes-history-list hermes-cockpit-scroll">
+      {runs.length === 0 ? (
+        <div className="tool-screen-empty">Aucun resultat de cron en cache</div>
+      ) : runs.slice(0, 24).map((run) => (
+        <button key={run.id} className={`hermes-run-row ${run.status} ${run.read ? 'read' : 'unread'}`} onClick={() => onOpenRun(run)}>
+          <span className="hermes-run-status">{run.status === 'failed' ? 'ERR' : 'OK'}</span>
+          <span className="hermes-run-content">
+            <strong>{run.jobName}</strong>
+            <span>{previewText(run.result, 120)}</span>
+          </span>
+          <span className="hermes-run-time">{new Date(run.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+        </button>
+      ))}
+    </div>
+  );
 
   return (
-    <div className={`tool-screen-window ${isWorking ? 'active' : ''}`}>
+    <div className={`tool-screen-window hermes-cockpit-window ${isWorking || syncState === 'syncing' ? 'active' : ''}`}>
       <div className="tool-screen-header">
-        <span className="tool-screen-led" />
-        <span>OUTILS HERMES</span>
-        <span>{isWorking ? 'ACTIF' : 'VEILLE'}</span>
+        <span className={`tool-screen-led ${syncState}`} />
+        <span>COCKPIT HERMES</span>
+        <button className="hermes-icon-btn" onClick={onRefresh} title="Synchroniser Hermes">
+          <RefreshCw size={12} />
+        </button>
       </div>
-      <div className="tool-screen-body">
-        {latestEvents.length === 0 ? (
-          <div className="tool-screen-empty">Aucun outil en cours</div>
-        ) : (
-          latestEvents.map((event) => (
-            <div key={event.id} className={`tool-screen-line ${event.status}`}>
-              <span className="tool-screen-status">{event.status.toUpperCase()}</span>
-              <span className="tool-screen-text">{event.label}</span>
-              {event.detail && <span className="tool-screen-detail">{event.detail}</span>}
-            </div>
-          ))
-        )}
+      <div className="hermes-cockpit-status">
+        {syncState === 'offline' ? <WifiOff size={12} /> : <CheckCircle2 size={12} />}
+        <span>{syncState === 'offline' ? 'HERMES OFFLINE' : syncState === 'syncing' ? 'SYNC...' : 'HERMES ONLINE'}</span>
+        {lastSyncAt && <span>{new Date(lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
       </div>
+      {syncState === 'offline' && syncDetail && <div className="hermes-cockpit-error">{previewText(syncDetail, 120)}</div>}
+      <div className="hermes-cockpit-tabs">
+        <button className={activeTab === 'tools' ? 'active' : ''} onClick={() => setActiveTab('tools')} title="Outils Hermes"><Wrench size={13} /></button>
+        <button className={activeTab === 'crons' ? 'active' : ''} onClick={() => setActiveTab('crons')} title="Crons Hermes"><CalendarClock size={13} /></button>
+        <button className={activeTab === 'history' ? 'active' : ''} onClick={() => setActiveTab('history')} title="Historique des crons">
+          <History size={13} />
+          {unreadRuns > 0 && <span className="hermes-tab-badge">{unreadRuns}</span>}
+        </button>
+      </div>
+      {activeTab === 'tools' && renderTools()}
+      {activeTab === 'crons' && renderCrons()}
+      {activeTab === 'history' && renderHistory()}
     </div>
   );
 };
@@ -524,6 +758,14 @@ export const App: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
+  const [hermesJobs, setHermesJobs] = useState<HermesJob[]>([]);
+  const [hermesRunHistory, setHermesRunHistory] = useState<HermesRunRecord[]>([]);
+  const [hermesLastSyncAt, setHermesLastSyncAt] = useState<string>('');
+  const [hermesSyncState, setHermesSyncState] = useState<HermesSyncState>('idle');
+  const [hermesSyncDetail, setHermesSyncDetail] = useState<string>('');
+  const [hermesCronDraft, setHermesCronDraft] = useState<HermesJobDraft>(() => createDefaultCronDraft());
+  const [editingHermesJobId, setEditingHermesJobId] = useState<string | null>(null);
+  const [isSavingHermesCron, setIsSavingHermesCron] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [currentlyPlayingMsgId, setCurrentlyPlayingMsgId] = useState<string | null>(null);
 
@@ -658,6 +900,151 @@ export const App: React.FC = () => {
 
 
   // Session Hermes persistante — garantit la continuité mémoire/skills entre redémarrages
+  const persistHermesCronCache = (cache: HermesCronCache) => {
+    persistWrite('eveflow_hermes_cron_cache', JSON.stringify(cache));
+  };
+
+  const mergeHermesJobs = (jobs: HermesJob[], syncedAt: string) => {
+    setHermesJobs(jobs);
+    setHermesLastSyncAt(syncedAt);
+    setHermesRunHistory(prev => {
+      const previousById = new Map(prev.map(run => [run.id, run]));
+      const incoming = jobs
+        .map(buildRunRecordFromJob)
+        .filter((run): run is HermesRunRecord => !!run)
+        .map(run => ({ ...run, read: previousById.get(run.id)?.read ?? false }));
+      const merged = [...incoming, ...prev.filter(run => !incoming.some(next => next.id === run.id))]
+        .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+        .slice(0, 80);
+
+      persistHermesCronCache({ jobs, runs: merged, lastSyncAt: syncedAt });
+
+      const newRuns = incoming.filter(run => !previousById.has(run.id));
+      if (newRuns.length > 0) {
+        const newest = newRuns[0];
+        setMessages(messagesPrev => [...messagesPrev, {
+          id: newest.id,
+          role: 'assistant',
+          content: newest.result,
+          source: 'cron',
+          timestamp: new Date(newest.at)
+        }]);
+        setCurrentEmotion(newest.status === 'failed' ? 'sad' : 'happy');
+        if (!isMuted && audioServiceRef.current && newest.status === 'succeeded') {
+          audioServiceRef.current.speak(newest.result, selectedVoice, ttsRate, 1.1, ttsProvider);
+        }
+      }
+
+      return merged;
+    });
+  };
+
+  const refreshHermesJobs = async () => {
+    if (!pollingServiceRef.current || agentConfig.provider !== 'hermes') return;
+    try {
+      setHermesSyncState('syncing');
+      const snapshot = await pollingServiceRef.current.refresh();
+      mergeHermesJobs(snapshot.jobs, snapshot.syncedAt);
+      setHermesSyncState('online');
+      setHermesSyncDetail('');
+    } catch (e: any) {
+      setHermesSyncState('offline');
+      setHermesSyncDetail(e?.message || String(e));
+    }
+  };
+
+  const finishHermesCronMutation = async (successLabel: string) => {
+    pushToolEvent({ label: successLabel, status: 'done' });
+    await refreshHermesJobs();
+  };
+
+  const handleCreateHermesCron = async () => {
+    if (!pollingServiceRef.current) return;
+    setIsSavingHermesCron(true);
+    pushToolEvent({ label: 'Creation cron Hermes', status: 'running', detail: hermesCronDraft.schedule });
+    try {
+      await pollingServiceRef.current.createJob(hermesCronDraft);
+      setHermesCronDraft(createDefaultCronDraft());
+      await finishHermesCronMutation('Cron Hermes cree');
+    } catch (e: any) {
+      const message = e?.message || String(e);
+      setErrorMessage(`Cron Hermes: ${message}`);
+      pushToolEvent({ label: 'Creation cron Hermes', status: 'error', detail: message });
+    } finally {
+      setIsSavingHermesCron(false);
+    }
+  };
+
+  const handleStartEditHermesCron = (job: HermesJob) => {
+    setEditingHermesJobId(getHermesJobId(job));
+    setHermesCronDraft({
+      name: job.name || getHermesJobId(job),
+      schedule: formatHermesSchedule(job.schedule),
+      prompt: job.prompt || '',
+      deliver: typeof job.deliver === 'string' ? job.deliver : 'local'
+    });
+  };
+
+  const handleCancelEditHermesCron = () => {
+    setEditingHermesJobId(null);
+    setHermesCronDraft(createDefaultCronDraft());
+  };
+
+  const handleUpdateHermesCron = async () => {
+    if (!pollingServiceRef.current || !editingHermesJobId) return;
+    setIsSavingHermesCron(true);
+    pushToolEvent({ label: 'Mise a jour cron Hermes', status: 'running', detail: editingHermesJobId });
+    try {
+      await pollingServiceRef.current.updateJob(editingHermesJobId, hermesCronDraft);
+      handleCancelEditHermesCron();
+      await finishHermesCronMutation('Cron Hermes mis a jour');
+    } catch (e: any) {
+      const message = e?.message || String(e);
+      setErrorMessage(`Cron Hermes: ${message}`);
+      pushToolEvent({ label: 'Mise a jour cron Hermes', status: 'error', detail: message });
+    } finally {
+      setIsSavingHermesCron(false);
+    }
+  };
+
+  const runHermesCronAction = async (job: HermesJob, action: 'pause' | 'resume' | 'run' | 'delete') => {
+    if (!pollingServiceRef.current) return;
+    const jobId = getHermesJobId(job);
+    const labels = {
+      pause: 'Pause cron Hermes',
+      resume: 'Reprise cron Hermes',
+      run: 'Execution immediate Hermes',
+      delete: 'Suppression cron Hermes'
+    };
+    pushToolEvent({ label: labels[action], status: 'running', detail: job.name || jobId });
+    try {
+      if (action === 'pause') await pollingServiceRef.current.pauseJob(jobId);
+      if (action === 'resume') await pollingServiceRef.current.resumeJob(jobId);
+      if (action === 'run') await pollingServiceRef.current.runJob(jobId);
+      if (action === 'delete') await pollingServiceRef.current.deleteJob(jobId);
+      await finishHermesCronMutation(`${labels[action]} OK`);
+    } catch (e: any) {
+      const message = e?.message || String(e);
+      setErrorMessage(`Cron Hermes: ${message}`);
+      pushToolEvent({ label: labels[action], status: 'error', detail: message });
+    }
+  };
+
+  const openHermesRunInChat = (run: HermesRunRecord) => {
+    setHermesRunHistory(prev => {
+      const updated = prev.map(item => item.id === run.id ? { ...item, read: true } : item);
+      persistHermesCronCache({ jobs: hermesJobs, runs: updated, lastSyncAt: hermesLastSyncAt });
+      return updated;
+    });
+    setMessages(prev => [...prev, {
+      id: `cron-open-${run.id}`,
+      role: 'assistant',
+      content: run.result,
+      source: 'cron',
+      timestamp: new Date(run.at)
+    }]);
+  };
+
   const [hermesSessionId, setHermesSessionId] = useState<string>('');
 
   // Références de services
@@ -779,6 +1166,18 @@ export const App: React.FC = () => {
     });
 
     // Charger les voix système
+    persistRead('eveflow_hermes_cron_cache').then(savedCache => {
+      if (!savedCache) return;
+      try {
+        const parsed = JSON.parse(savedCache) as HermesCronCache;
+        if (Array.isArray(parsed.jobs)) setHermesJobs(parsed.jobs);
+        if (Array.isArray(parsed.runs)) setHermesRunHistory(parsed.runs);
+        if (parsed.lastSyncAt) setHermesLastSyncAt(parsed.lastSyncAt);
+      } catch (e) {
+        console.warn('Cache Hermes crons illisible', e);
+      }
+    });
+
     const loadVoices = () => {
       const voices = service.getVoices();
       setAvailableVoices(voices);
@@ -818,6 +1217,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (agentConfig.provider !== 'hermes') {
       pollingServiceRef.current?.stop();
+      setHermesSyncState('idle');
       return;
     }
 
@@ -825,21 +1225,18 @@ export const App: React.FC = () => {
       pollingServiceRef.current = new PollingService(30000);
     }
 
-    pollingServiceRef.current.start(agentConfig.hermesUrl, agentConfig.hermesApiKey, (job) => {
-      if (job.result) {
-        setMessages(prev => [...prev, {
-          id: Math.random().toString(),
-          role: 'assistant',
-          content: job.result!,
-          timestamp: new Date()
-        }]);
-        // Trigger generic emotion for a pushed job
-        setCurrentEmotion('happy');
-        if (!isMuted && audioServiceRef.current) {
-          audioServiceRef.current.speak(job.result, selectedVoice, ttsRate, 1.1, ttsProvider);
-        }
+    pollingServiceRef.current.start(
+      agentConfig.hermesUrl,
+      agentConfig.hermesApiKey,
+      (snapshot) => {
+        mergeHermesJobs(snapshot.jobs, snapshot.syncedAt);
+        setHermesSyncDetail('');
+      },
+      (status, detail) => {
+        setHermesSyncState(status);
+        setHermesSyncDetail(detail || '');
       }
-    });
+    );
 
     return () => pollingServiceRef.current?.stop();
   }, [agentConfig.provider, agentConfig.hermesUrl, agentConfig.hermesApiKey, isMuted, selectedVoice, ttsRate, ttsProvider]);
@@ -1817,9 +2214,28 @@ export const App: React.FC = () => {
               avatarId={avatarId}
             />
             {agentConfig.provider === 'hermes' && (
-              <ToolMonitorWindow
+              <HermesCockpitWindow
                 events={toolEvents}
                 isWorking={isSending}
+                jobs={hermesJobs}
+                runs={hermesRunHistory}
+                syncState={hermesSyncState}
+                syncDetail={hermesSyncDetail}
+                lastSyncAt={hermesLastSyncAt}
+                draft={hermesCronDraft}
+                editingJobId={editingHermesJobId}
+                isSaving={isSavingHermesCron}
+                onDraftChange={setHermesCronDraft}
+                onCreate={handleCreateHermesCron}
+                onCancelEdit={handleCancelEditHermesCron}
+                onStartEdit={handleStartEditHermesCron}
+                onUpdate={handleUpdateHermesCron}
+                onRefresh={refreshHermesJobs}
+                onPause={(job) => runHermesCronAction(job, 'pause')}
+                onResume={(job) => runHermesCronAction(job, 'resume')}
+                onRun={(job) => runHermesCronAction(job, 'run')}
+                onDelete={(job) => runHermesCronAction(job, 'delete')}
+                onOpenRun={openHermesRunInChat}
               />
             )}
             {avatarId !== 'eve' && activeAvatar.assetPath && (
