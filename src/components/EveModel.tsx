@@ -269,7 +269,7 @@ export const EveModel: React.FC<EveModelProps> = ({ emotion, isSpeaking, avatarI
 
   // Charger les matériaux et le modèle OBJ depuis le répertoire public
   const materials = useLoader(MTLLoader, './Eve/EVE.mtl');
-  const obj = useLoader(OBJLoader, './Eve/EVE.obj', (loader) => {
+  const obj = useLoader(OBJLoader, './Eve/EVE.obj.bin', (loader) => {
     materials.preload();
     loader.setMaterials(materials);
   });

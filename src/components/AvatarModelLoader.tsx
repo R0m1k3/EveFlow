@@ -13,7 +13,7 @@ interface AvatarModelLoaderProps {
 
 type AvatarManifest = Partial<Record<Exclude<EveAvatar, 'eve'>, string | null>>;
 
-const AVATAR_MANIFEST_PATH = '/avatars/avatar-manifest.json';
+const AVATAR_MANIFEST_PATH = './avatars/avatar-manifest.json';
 
 const LoadedGlbAvatar: React.FC<{
   path: string;
@@ -81,8 +81,16 @@ export const AvatarModelLoader: React.FC<AvatarModelLoaderProps> = ({ avatarId, 
       })
       .then((manifest) => {
         if (cancelled || !manifest) return;
-        const nextAssetPath = manifest[avatarId];
-        setAssetPath(typeof nextAssetPath === 'string' && nextAssetPath.trim() ? nextAssetPath : null);
+        let nextAssetPath = manifest[avatarId];
+        if (typeof nextAssetPath === 'string' && nextAssetPath.trim()) {
+          // Si le chemin commence par un slash, on le rend relatif pour fonctionner sous le protocole file:// en production
+          if (nextAssetPath.startsWith('/')) {
+            nextAssetPath = '.' + nextAssetPath;
+          }
+          setAssetPath(nextAssetPath);
+        } else {
+          setAssetPath(null);
+        }
       })
       .catch(() => {
         if (!cancelled) setAssetPath(null);

@@ -3,7 +3,25 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+// Autoriser le chargement de fichiers locaux via fetch sous le protocole file://
+app.commandLine.appendSwitch('disable-web-security');
+app.commandLine.appendSwitch('allow-file-access-from-files');
+
 let mainWindow;
+
+// ── Single Instance Lock ───────────────────────────────────────────────────
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+  process.exit(0);
+}
+
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
 
 // ── Logging Setup ───────────────────────────────────────────────────────────
 function getLogPath() {
@@ -207,6 +225,7 @@ function createWindow() {
     transparent: true, // Permet la transparence (fond de fenêtre transparent)
     backgroundColor: '#00000000', // Fond transparent
     hasShadow: true,
+    show: false, // Cache la fenêtre au démarrage pour éviter les problèmes visuels de DWM
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,      // Sécurité Zero Trust active
@@ -214,6 +233,15 @@ function createWindow() {
       webSecurity: false,          // Permet les requêtes HTTP vers API locales/LAN
       allowRunningInsecureContent: true, // Autorise HTTP depuis le renderer (API locales)
     },
+  });
+
+  mainWindow.once('ready-to-show', () => {
+    // Petit délai de sécurité (80ms) pour garantir la synchronisation DWM sous Windows
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+      }
+    }, 80);
   });
 
   loadApp().catch((error) => {

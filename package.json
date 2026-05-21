@@ -15,6 +15,7 @@
     "appId": "com.romik3.eveflow",
     "productName": "EveFlow",
     "copyright": "Copyright © 2026 R0m1k3",
+    "asar": false,
     "directories": {
       "output": "out"
     },
