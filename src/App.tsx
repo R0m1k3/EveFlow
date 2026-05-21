@@ -1064,6 +1064,7 @@ export const App: React.FC = () => {
   // Références de services
   const audioServiceRef = useRef<AudioService | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const compactMessagesEndRef = useRef<HTMLDivElement>(null);
   const pollingServiceRef = useRef<PollingService | null>(null);
 
   // AppCallbacks for tools
@@ -1223,7 +1224,8 @@ export const App: React.FC = () => {
   // Défilement automatique
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, showSettings]);
+    compactMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, showSettings, isFloatingMode]);
 
 
 
@@ -2233,7 +2235,7 @@ export const App: React.FC = () => {
           )}
 
           {/* Rendu Canvas 3D */}
-          <div style={{ flex: 1, width: '100%', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ flex: isFloatingMode ? 'none' : 1, height: isFloatingMode ? '165px' : 'auto', width: '100%', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: isFloatingMode ? '34px' : '0' }}>
             <ThreeCanvas
               emotion={currentEmotion}
               isSpeaking={isSpeaking}
@@ -2255,30 +2257,76 @@ export const App: React.FC = () => {
             )}
           </div>
 
-          {/* Contrôle micro en mode Widget */}
+          {/* Chat compact en bas en mode Widget */}
           {isFloatingMode && (
-            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', paddingBottom: '12px' }}>
-              <button
-                onClick={isListening ? handleStopListening : handleStartVocalRecord}
-                className="neon-btn"
-                style={{ 
-                  borderRadius: '50%', 
-                  padding: '16px',
-                  width: '56px',
-                  height: '56px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  background: isListening ? 'linear-gradient(135deg, #ef4444, #b91c1c)' : 'linear-gradient(135deg, var(--accent-cyan), var(--accent-blue))',
-                  boxShadow: isListening ? '0 0 20px rgba(239, 68, 68, 0.4)' : '0 4px 12px rgba(255, 85, 0, 0.25)',
-                  border: '2px solid var(--text-primary)'
-                }}
-                title={isListening ? "Arrêter l'écoute" : `Parler à ${activeAvatar.name}`}
-              >
-                {isListening ? <MicOff style={{ width: '22px', height: '22px' }} /> : <Mic style={{ width: '22px', height: '22px' }} />}
-              </button>
-              <div style={{ fontSize: '9px', fontWeight: '800', textTransform: 'uppercase', color: 'var(--text-secondary)', letterSpacing: '1.5px', padding: '4px 14px', borderRadius: '15px', backgroundColor: 'var(--bg-secondary)', border: '2px solid var(--text-primary)', fontFamily: 'var(--font-title)' }}>
-                {isListening ? "À l'écoute..." : "Prête à t'écouter"}
+            <div className="compact-chat-container" style={{ display: 'flex', flexDirection: 'column', flex: 1, width: '100%', minHeight: 0, gap: '8px', marginTop: '4px' }}>
+              {/* Petite zone de messages défilable */}
+              <div className="compact-messages-list" style={{ flex: 1, overflowY: 'auto', padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11px', lineHeight: '1.4', border: '1px solid rgba(0, 242, 255, 0.12)', borderRadius: '8px', backgroundColor: 'rgba(5, 9, 20, 0.65)', minHeight: 0 }}>
+                {messages.slice(-5).map((msg) => {
+                  const isUser = msg.role === 'user';
+                  return (
+                    <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignSelf: isUser ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
+                      <div style={{
+                        padding: '6px 10px',
+                        borderRadius: '10px',
+                        border: isUser ? '1px solid rgba(0, 212, 245, 0.35)' : '1px solid rgba(226, 240, 255, 0.15)',
+                        backgroundColor: isUser ? 'rgba(0, 212, 245, 0.12)' : 'rgba(10, 15, 30, 0.75)',
+                        color: isUser ? 'var(--accent-cyan)' : 'var(--text-primary)',
+                        wordBreak: 'break-word',
+                        boxShadow: isUser ? '0 0 10px rgba(0, 212, 245, 0.05)' : 'none'
+                      }}>
+                        {msg.content}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={compactMessagesEndRef} />
+              </div>
+
+              {/* Barre de saisie compacte */}
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center', width: '100%', paddingBottom: '2px' }}>
+                <input
+                  type="text"
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSendMessage(inputText)}
+                  placeholder="Message..."
+                  className="glow-input"
+                  disabled={isSending}
+                  style={{ flex: 1, fontSize: '11px', padding: '6px 12px', height: '32px', borderRadius: '16px', border: '1px solid rgba(0, 242, 255, 0.2)', backgroundColor: '#050914', color: 'var(--text-primary)' }}
+                />
+                
+                <button
+                  onClick={isListening ? handleStopListening : handleStartVocalRecord}
+                  className="input-circle-btn"
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    minWidth: '32px',
+                    borderRadius: '50%',
+                    border: '1px solid',
+                    borderColor: isListening ? '#ef4444' : 'rgba(226, 240, 255, 0.12)',
+                    backgroundColor: isListening ? 'rgba(239, 68, 68, 0.15)' : '#050914',
+                    padding: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer'
+                  }}
+                  title={isListening ? "Arrêter l'écoute" : "Saisie vocale"}
+                >
+                  {isListening ? <MicOff style={{ width: '13px', height: '13px', color: '#ef4444' }} /> : <Mic style={{ width: '13px', height: '13px', color: 'var(--text-secondary)' }} />}
+                </button>
+
+                <button
+                  onClick={() => handleSendMessage(inputText)}
+                  disabled={(!inputText.trim() && attachments.length === 0) || isSending}
+                  className="input-send-btn"
+                  style={{ width: '32px', height: '32px', minWidth: '32px', borderRadius: '50%', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', backgroundColor: 'var(--accent-cyan)', color: '#000', cursor: 'pointer' }}
+                  title="Envoyer"
+                >
+                  <Send style={{ width: '11px', height: '11px' }} />
+                </button>
               </div>
             </div>
           )}

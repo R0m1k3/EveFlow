@@ -293,11 +293,13 @@ body {
 .eve-section.floating-widget {
   width: 100%;
   height: 100%;
-  padding: 20px;
+  padding: 12px;
   background-color: var(--bg-glass-active);
   border: 4px solid var(--text-primary);
   border-radius: var(--radius-lg);
   box-shadow: var(--glow-cyan-active), 0 10px 25px rgba(255, 85, 0, 0.1);
+  justify-content: flex-start;
+  align-items: stretch;
 }
 
 .avatar-ambient-field {
