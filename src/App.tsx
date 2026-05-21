@@ -2240,6 +2240,7 @@ export const App: React.FC = () => {
               emotion={currentEmotion}
               isSpeaking={isSpeaking}
               avatarId={avatarId}
+              isFloatingMode={isFloatingMode}
             />
             {avatarId !== 'eve' && activeAvatar.assetPath && (
               <div style={{ position: 'absolute', top: '16px', left: '50%', transform: 'translateX(-50%)', padding: '7px 14px', borderRadius: '18px', backgroundColor: 'var(--bg-secondary)', border: '1px solid rgba(0,212,245,0.25)', boxShadow: '0 0 20px rgba(0,212,245,0.1)', fontSize: '9px', fontFamily: 'var(--font-mono)', fontWeight: 800, letterSpacing: '0.8px', color: 'var(--text-secondary)', textTransform: 'uppercase', pointerEvents: 'none' }}>

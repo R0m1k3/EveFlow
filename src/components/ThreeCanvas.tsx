@@ -17,6 +17,7 @@ interface ThreeCanvasProps {
   emotion: EveEmotion;
   isSpeaking: boolean;
   avatarId?: EveAvatar;
+  isFloatingMode?: boolean;
 }
 
 interface HologramProjectionProps {
@@ -574,11 +575,11 @@ const HologramProjection: React.FC<HologramProjectionProps> = ({ emotion, isSpea
   );
 };
 
-export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({ emotion, isSpeaking, avatarId = 'eve' }) => {
+export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({ emotion, isSpeaking, avatarId = 'eve', isFloatingMode = false }) => {
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <Canvas
-        camera={{ position: [0, 1.1, 5.8], fov: 36 }}
+        camera={{ position: isFloatingMode ? [0, 0.72, 3.7] : [0, 1.1, 5.8], fov: isFloatingMode ? 30 : 36 }}
         gl={{ alpha: true, antialias: true, premultipliedAlpha: false }}
         onCreated={({ gl }) => {
           gl.setClearColor(0x000000, 0);
@@ -615,8 +616,8 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({ emotion, isSpeaking, a
         {/* OrbitControls calibrated to prevent clipping or losing focus */}
         <OrbitControls 
           enableZoom={true} 
-          minDistance={4.8}
-          maxDistance={6.8}
+          minDistance={isFloatingMode ? 2.4 : 4.8}
+          maxDistance={isFloatingMode ? 4.7 : 6.8}
           enablePan={false} 
           autoRotate={false}
           maxPolarAngle={Math.PI / 1.7} 
