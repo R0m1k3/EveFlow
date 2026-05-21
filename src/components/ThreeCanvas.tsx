@@ -4,6 +4,14 @@ import { OrbitControls } from '@react-three/drei';
 import { AvatarModelLoader } from './AvatarModelLoader';
 import { EveEmotion, EveAvatar } from '../services/emotionService';
 
+export interface ToolEvent {
+  id: string;
+  label: string;
+  detail?: string;
+  status: 'idle' | 'running' | 'done' | 'error';
+  ts: number;
+}
+
 interface ThreeCanvasProps {
   emotion: EveEmotion;
   isSpeaking: boolean;
@@ -14,10 +22,13 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({ emotion, isSpeaking, a
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <Canvas
-        camera={{ position: [0, 0, 4.6], fov: 45 }}
-        gl={{ alpha: true, antialias: true }}
+        camera={{ position: [0, 0.05, 6.2], fov: 36 }}
+        gl={{ alpha: true, antialias: true, premultipliedAlpha: false }}
+        onCreated={({ gl }) => {
+          gl.setClearColor(0x000000, 0);
+        }}
         dpr={[1, 2]}
-        style={{ background: 'transparent' }}
+        style={{ background: 'transparent', backgroundColor: 'transparent' }}
       >
         {/* Soft ambient — dark space base */}
         <ambientLight intensity={0.6} color="#b0c8e8" />
@@ -46,8 +57,8 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({ emotion, isSpeaking, a
         {/* OrbitControls calibrated to prevent clipping or losing focus */}
         <OrbitControls 
           enableZoom={true} 
-          minDistance={2.2}
-          maxDistance={5.5}
+          minDistance={5.2}
+          maxDistance={7.2}
           enablePan={false} 
           autoRotate={false}
           maxPolarAngle={Math.PI / 1.7} 

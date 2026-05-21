@@ -452,8 +452,8 @@ export const EveModel: React.FC<EveModelProps> = ({ emotion, isSpeaking, avatarI
     const center = new THREE.Vector3();
     localBox.getCenter(center);
 
-    // Normalize height to exactly 2.4 units in scene space
-    const targetHeight = 2.4;
+    // Normalize height conservatively so the avatar stays inside the right panel.
+    const targetHeight = 1.18;
     const scaleFactor = targetHeight / (size.y || 1);
     clonedObj.scale.setScalar(scaleFactor);
 
@@ -760,7 +760,7 @@ export const EveModel: React.FC<EveModelProps> = ({ emotion, isSpeaking, avatarI
   });
 
   return (
-    <group ref={modelRef} scale={1.0} position={[0, 0.22, 0]}>
+    <group ref={modelRef} scale={1.0} position={[0, -0.28, 0]}>
       <primitive object={clonedObj} />
     </group>
   );

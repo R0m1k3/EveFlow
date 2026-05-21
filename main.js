@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -42,34 +42,55 @@ let webhookServer = null;
 // Handles multiple formats so EveFlow mirrors both sides of Telegram conversations.
 function normalizeHermesEvents(raw) {
   const src = raw.platform || raw.source || 'webhook';
+  const collectImages = (obj) => {
+    const images = [];
+    const push = (value) => {
+      if (!value) return;
+      if (typeof value === 'string') images.push(value);
+      else if (typeof value === 'object') push(value.url || value.href || value.path || value.file || value.file_url || value.media_url);
+    };
+    for (const key of ['image', 'image_url', 'photo', 'media', 'url', 'file', 'file_url', 'media_url']) {
+      push(obj?.[key]);
+    }
+    for (const key of ['images', 'photos', 'media_urls', 'attachments', 'files']) {
+      const value = obj?.[key];
+      if (Array.isArray(value)) value.forEach(push);
+      else push(value);
+    }
+    return [...new Set(images)];
+  };
+  const withImages = (event, obj) => {
+    const images = collectImages(obj);
+    return images.length ? { ...event, images } : event;
+  };
 
   // Format A — { type:'message', payload:{ text, role?, platform? } }
   if (raw.type === 'message' && raw.payload?.text) {
-    return [{
+    return [withImages({
       type: 'message',
       role: raw.payload.role || 'assistant',
       text: raw.payload.text,
       source: raw.payload.platform || src
-    }];
+    }, raw.payload)];
   }
 
   // Format B — run completed: { event:'run.completed', input?, output, platform? }
   if ((raw.event === 'run.completed' || raw.type === 'run.completed') && raw.output) {
     const events = [];
     if (raw.input) events.push({ type: 'message', role: 'user', text: raw.input, source: src });
-    events.push({ type: 'message', role: 'assistant', text: raw.output, source: src });
+    events.push(withImages({ type: 'message', role: 'assistant', text: raw.output, source: src }, raw));
     return events;
   }
 
   // Format C — direct: { role, text, source? }
   if (raw.role && raw.text) {
-    return [{ type: 'message', role: raw.role, text: raw.text, source: src }];
+    return [withImages({ type: 'message', role: raw.role, text: raw.text, source: src }, raw)];
   }
 
   // Format D — legacy: { type:'user_message'|'assistant_message', text }
   if (raw.text && raw.type) {
     const role = raw.type.includes('user') ? 'user' : 'assistant';
-    return [{ type: 'message', role, text: raw.text, source: src }];
+    return [withImages({ type: 'message', role, text: raw.text, source: src }, raw)];
   }
 
   // Passthrough — let renderer decide
@@ -206,6 +227,16 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Configurer l'intercepteur de requêtes pour Google TTS pour contourner le blocage HTTP 403 (User-Agent Electron)
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ['https://translate.google.com/*'] },
+    (details, callback) => {
+      details.requestHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+      details.requestHeaders['Referer'] = 'https://translate.google.com/';
+      callback({ cancel: false, requestHeaders: details.requestHeaders });
+    }
+  );
+
   startWebhookServer();
   createWindow();
 
@@ -371,6 +402,108 @@ ipcMain.handle('read-local-file', async (_event, filePath) => {
     });
     throw err;
   }
+});
+
+// Handler pour charger une image distante via Node.js (contourne CORS et les restrictions du navigateur Electron)
+// Retourne une Data URL base64 pour un affichage garanti sans flickering ni erreur CORS
+ipcMain.handle('fetch-remote-image', async (_event, url, extraHeaders = {}) => {
+  const https = require('https');
+  const http = require('http');
+
+  writeLogEntry({ ts: new Date().toISOString(), level: 'INFO', tag: 'IPC-Image', message: `fetch-remote-image: ${url}` });
+
+  return new Promise((resolve, reject) => {
+    try {
+      if (!url || typeof url !== 'string' || (!url.startsWith('http://') && !url.startsWith('https://'))) {
+        const err = `URL invalide : ${url}`;
+        writeLogEntry({ ts: new Date().toISOString(), level: 'ERROR', tag: 'IPC-Image', message: err });
+        reject(new Error(err));
+        return;
+      }
+
+      const client = url.startsWith('https://') ? https : http;
+      let timeoutId;
+      let isSettled = false;
+      const settleReject = (err) => {
+        if (isSettled) return;
+        isSettled = true;
+        clearTimeout(timeoutId);
+        reject(err);
+      };
+      const settleResolve = (value) => {
+        if (isSettled) return;
+        isSettled = true;
+        clearTimeout(timeoutId);
+        resolve(value);
+      };
+
+      const req = client.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'image/*, */*',
+          ...extraHeaders,
+        },
+      }, (res) => {
+        writeLogEntry({ ts: new Date().toISOString(), level: 'INFO', tag: 'IPC-Image', message: `HTTP ${res.statusCode} — Content-Type: ${res.headers['content-type']} — URL: ${url}` });
+
+        // Gérer les redirects HTTP 301/302
+        if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
+          writeLogEntry({ ts: new Date().toISOString(), level: 'INFO', tag: 'IPC-Image', message: `Redirect → ${res.headers.location}` });
+          // Suivre le redirect récursivement
+          const newUrl = res.headers.location;
+          const newClient = newUrl.startsWith('https://') ? https : http;
+          newClient.get(newUrl, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'image/*' } }, (res2) => {
+            if (res2.statusCode !== 200) { reject(new Error(`HTTP ${res2.statusCode} après redirect`)); return; }
+            const chunks2 = [];
+            res2.on('data', c => chunks2.push(c));
+            res2.on('end', () => {
+              const buf = Buffer.concat(chunks2);
+              const ct = ((res2.headers['content-type'] || 'image/jpeg').split(';')[0]).trim();
+              settleResolve(`data:${ct};base64,${buf.toString('base64')}`);
+            });
+          }).on('error', settleReject);
+          return;
+        }
+
+        if (res.statusCode !== 200) {
+          const err = `HTTP ${res.statusCode} pour ${url}`;
+          writeLogEntry({ ts: new Date().toISOString(), level: 'ERROR', tag: 'IPC-Image', message: err });
+          res.resume();
+          settleReject(new Error(err));
+          return;
+        }
+
+        const chunks = [];
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => {
+          try {
+            const buf = Buffer.concat(chunks);
+            const ct = ((res.headers['content-type'] || 'image/jpeg').split(';')[0]).trim();
+            const dataUrl = `data:${ct};base64,${buf.toString('base64')}`;
+            writeLogEntry({ ts: new Date().toISOString(), level: 'INFO', tag: 'IPC-Image', message: `Image chargée OK — ${buf.length} octets — ${ct}` });
+            settleResolve(dataUrl);
+          } catch (e) {
+            settleReject(e);
+          }
+        });
+        res.on('error', settleReject);
+      });
+
+      timeoutId = setTimeout(() => {
+        req.destroy();
+        const err = `Timeout (12s) pour ${url}`;
+        writeLogEntry({ ts: new Date().toISOString(), level: 'ERROR', tag: 'IPC-Image', message: err });
+        settleReject(new Error(err));
+      }, 12000);
+      req.on('error', (err) => {
+        writeLogEntry({ ts: new Date().toISOString(), level: 'ERROR', tag: 'IPC-Image', message: `Erreur réseau: ${err.message} — ${url}` });
+        settleReject(err);
+      });
+    } catch (err) {
+      writeLogEntry({ ts: new Date().toISOString(), level: 'ERROR', tag: 'IPC-Image', message: `Exception: ${err.message}` });
+      reject(err);
+    }
+  });
 });
 
 // ── CPU Telemetry Helper ───────────────────────────────────────────────────

@@ -5,7 +5,7 @@ import {
   Send, Mic, MicOff, Settings, MessageSquare, Volume2, VolumeX,
   Sparkles, Cpu, Minimize2, X, AlertCircle, StopCircle, Paperclip
 } from 'lucide-react';
-import { ThreeCanvas } from './components/ThreeCanvas';
+import { ThreeCanvas, ToolEvent } from './components/ThreeCanvas';
 import { AudioService } from './services/audioService';
 import { AgentService, AgentConfig, AgentProvider } from './services/agentService';
 import { EmotionService, EveAvatar, EveEmotion } from './services/emotionService';
@@ -86,90 +86,298 @@ const compressImage = (dataUrl: string, mimeType: string): Promise<{ dataUrl: st
   });
 };
 
+// Prétraite le contenu d'un message pour convertir les tokens MEDIA:<chemin> en syntaxe Markdown image
+// Le bot Hermes envoie MEDIA:/tmp/cat.jpg au lieu de ![img](/tmp/cat.jpg), on corrige ça côté renderer
+const preprocessMessageContent = (content: string): string => {
+  if (!content) return content;
+  // Entourer de \n\n pour que ReactMarkdown traite l'image comme un élément bloc (pas inline)
+  return content.replace(/MEDIA:\s*(\S+)/g, (_match, filePath) => `\n\n![image](${filePath})\n\n`);
+};
+
+// Cache module-level des images déjà chargées (src → dataUrl ou blobUrl)
+// Évite les re-fetches et le clignotement quand ReactMarkdown recrée les composants pendant le streaming
+const _imgCache = new Map<string, string>();
+const _imgPending = new Map<string, Promise<string>>();
+const _imgErrorCache = new Map<string, string>();
+
 // Composant de rendu asynchrone pour les images locales dans ReactMarkdown et la galerie
 // Gère de façon Zero Trust la distinction entre base64 local, fichier Windows, et chemin absolu du serveur distant Hermes
+// Le cache module-level _imgCache évite les refetch et le clignotement lors du streaming React
 const LocalImage: React.FC<{ 
   src: string; 
   alt?: string; 
   agentUrl?: string; 
-  provider?: string; 
+  provider?: string;
+  hermesApiKey?: string;
+  hermesSessionKey?: string;
   [key: string]: any; 
-}> = ({ src, alt, agentUrl, provider, ...props }) => {
-  const [imageSrc, setImageSrc] = useState<string>('');
+}> = ({ src, alt, agentUrl, provider, hermesApiKey, hermesSessionKey, ...props }) => {
+  // Initialisation lazy : si déjà en cache, pas de flash du GIF transparent
+  const [imageSrc, setImageSrc] = useState<string>(() => _imgCache.get(src) || '');
+  const [error, setError] = useState<string>(() => _imgErrorCache.get(src) || '');
+  void error;
 
   useEffect(() => {
-    // 1. Si c'est une image base64 en direct (Data URL), pas de traitement IPC requis
+    if (!src) return;
+
+    // Cache hit : image déjà chargée, on l'affiche immédiatement sans aucun fetch
+    if (_imgCache.has(src)) {
+      setImageSrc(_imgCache.get(src)!);
+      return;
+    }
+
+    if (_imgErrorCache.has(src)) {
+      setError(_imgErrorCache.get(src)!);
+      return;
+    }
+
+    const setAndCache = (url: string) => {
+      _imgCache.set(src, url);
+      _imgErrorCache.delete(src);
+      setError('');
+      setImageSrc(url);
+    };
+
+    const setFailure = (message: string) => {
+      _imgErrorCache.set(src, message);
+      setError(message);
+      setImageSrc('');
+    };
+
+    const loadRemote = (remoteUrl: string, headers?: Record<string, string>) => {
+      const api = (window as any).electronAPI;
+      if (!api?.fetchRemoteImage) {
+        setAndCache(remoteUrl);
+        return;
+      }
+
+      if (!_imgPending.has(remoteUrl)) {
+        const pending = api.fetchRemoteImage(remoteUrl, headers || {})
+          .then((dataUrl: string) => {
+            _imgCache.set(remoteUrl, dataUrl);
+            _imgErrorCache.delete(remoteUrl);
+            return dataUrl;
+          })
+          .catch((err: any) => {
+            const message = `Image inaccessible (${err?.message || 'erreur reseau'})`;
+            _imgErrorCache.set(remoteUrl, message);
+            throw new Error(message);
+          })
+          .finally(() => _imgPending.delete(remoteUrl));
+        _imgPending.set(remoteUrl, pending);
+      }
+
+      _imgPending.get(remoteUrl)!
+        .then(setAndCache)
+        .catch((err: any) => setFailure(err?.message || 'Image inaccessible'));
+    };
+    void loadRemote;
+
+    // 1. Data URL directe — rien à faire
     if (src.startsWith('data:')) {
-      setImageSrc(src);
+      setAndCache(src);
       return;
     }
 
-    // 2. Si c'est une URL HTTP/HTTPS directe complète, on l'affiche directement
+    // 2. URL HTTP/HTTPS : passer par le processus principal Electron (Node.js) pour
+    //    charger l'image sans restriction CORS ni problème de serveur statique
     if (src.startsWith('http://') || src.startsWith('https://')) {
-      setImageSrc(src);
+      const api = (window as any).electronAPI;
+      if (api?.fetchRemoteImage) {
+        api.fetchRemoteImage(src)
+          .then(setAndCache)
+          .catch(() => setAndCache(src)); // fallback direct si IPC échoue
+      } else {
+        setAndCache(src);
+      }
       return;
     }
 
-    // 3. Détecter si c'est un chemin de fichier local réel sur la machine Windows de l'utilisateur
-    // Un vrai chemin local Windows commencera par file:// ou par une lettre de lecteur comme C:
+    // 3. Chemin local Windows (file:// ou C:\...)
     const isWindowsLocal = src.startsWith('file://') || /^[a-zA-Z]:/.test(src);
 
-    const resolveDistantFallback = () => {
+    const resolveRemoteHermes = () => {
       if (provider === 'hermes' && agentUrl) {
         try {
-          // Nettoyer l'URL de l'agent pour obtenir la racine du serveur (ex: http://host:port)
           const parsed = new URL(agentUrl);
           const hostUrl = `${parsed.protocol}//${parsed.host}`;
-          
           let relativePath = src;
-          // Nettoyer les reliquats de chemins de fichiers si présents
           if (src.startsWith('file://')) {
             relativePath = src.replace(/^file:\/\/\/[a-zA-Z]:/, '').replace(/^file:\/\//, '');
           } else if (/^[a-zA-Z]:/.test(src)) {
             relativePath = src.substring(2);
           }
-          
-          // Remplacer les antislashs par des slashs pour l'URL HTTP
           relativePath = relativePath.replace(/\\/g, '/');
-          
           const resolvedUrl = `${hostUrl.replace(/\/$/, '')}/${relativePath.replace(/^\//, '')}`;
-          console.log("[LocalImage] Chemin distant résolu pour Hermes:", resolvedUrl);
-          setImageSrc(resolvedUrl);
-        } catch (urlErr) {
-          console.error("[LocalImage] Impossible de résoudre l'URL de secours distante:", urlErr);
-          setImageSrc(src);
+
+          const authHeaders: Record<string, string> = {};
+          if (hermesApiKey) authHeaders['Authorization'] = `Bearer ${hermesApiKey}`;
+          if (hermesSessionKey) authHeaders['X-Hermes-Session-Key'] = hermesSessionKey;
+
+          const api = (window as any).electronAPI;
+          if (api?.fetchRemoteImage) {
+            api.fetchRemoteImage(resolvedUrl, authHeaders)
+              .then(setAndCache)
+              .catch(() => setAndCache(resolvedUrl));
+          } else {
+            setAndCache(resolvedUrl);
+          }
+        } catch {
+          setAndCache(src);
         }
       } else {
-        setImageSrc(src);
+        setAndCache(src);
       }
     };
 
     if (isWindowsLocal && (window as any).electronAPI?.readLocalFile) {
       let cleanPath = src;
-      // Retirer les préfixes de protocole file:/// ou file://
-      if (src.startsWith('file:///')) {
-        cleanPath = src.substring(8);
-      } else if (src.startsWith('file://')) {
-        cleanPath = src.substring(7);
-      }
-      
-      // Convertir les slashes pour s'adapter au système de fichiers Windows
+      if (src.startsWith('file:///')) cleanPath = src.substring(8);
+      else if (src.startsWith('file://')) cleanPath = src.substring(7);
       cleanPath = cleanPath.replace(/\//g, '\\');
-
       (window as any).electronAPI.readLocalFile(cleanPath)
-        .then((dataUrl: string) => {
-          setImageSrc(dataUrl);
-        })
-        .catch((err: any) => {
-          console.warn("[LocalImage] Échec de la lecture IPC locale, tentative de fallback distant:", err.message);
-          resolveDistantFallback();
-        });
+        .then(setAndCache)
+        .catch(() => resolveRemoteHermes());
     } else {
-      // Si ce n'est pas un chemin local Windows (par exemple un chemin Unix absolu /data/jobs...), 
-      // ou si l'API Electron n'est pas présente, on résout directement à distance sans faire d'appel IPC Windows coûteux qui échouera.
-      resolveDistantFallback();
+      // Chemin Unix (/tmp/cat.jpg) → construire l'URL Hermes et charger via IPC
+      resolveRemoteHermes();
     }
   }, [src, agentUrl, provider]);
+
+  return (
+    <img
+      src={imageSrc || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'}
+      alt={alt || 'Visualisation'}
+      className="markdown-image"
+      {...props}
+    />
+  );
+};
+void LocalImage;
+
+const ResilientImage: React.FC<{
+  src: string;
+  alt?: string;
+  agentUrl?: string;
+  provider?: string;
+  hermesApiKey?: string;
+  hermesSessionKey?: string;
+  [key: string]: any;
+}> = ({ src, alt, agentUrl, provider, hermesApiKey, hermesSessionKey, ...props }) => {
+  const [imageSrc, setImageSrc] = useState<string>(() => _imgCache.get(src) || '');
+  const [error, setError] = useState<string>(() => _imgErrorCache.get(src) || '');
+
+  useEffect(() => {
+    if (!src) return;
+
+    if (_imgCache.has(src)) {
+      setImageSrc(_imgCache.get(src)!);
+      setError('');
+      return;
+    }
+
+    if (_imgErrorCache.has(src)) {
+      setError(_imgErrorCache.get(src)!);
+      return;
+    }
+
+    const setSuccess = (cacheKey: string, value: string) => {
+      _imgCache.set(cacheKey, value);
+      _imgErrorCache.delete(cacheKey);
+      setImageSrc(value);
+      setError('');
+    };
+
+    const setFailure = (cacheKey: string, message: string) => {
+      _imgErrorCache.set(cacheKey, message);
+      setImageSrc('');
+      setError(message);
+    };
+
+    const loadRemote = (remoteUrl: string, headers?: Record<string, string>) => {
+      const api = (window as any).electronAPI;
+      if (!api?.fetchRemoteImage) {
+        setSuccess(src, remoteUrl);
+        return;
+      }
+
+      if (!_imgPending.has(remoteUrl)) {
+        const pending = api.fetchRemoteImage(remoteUrl, headers || {})
+          .then((dataUrl: string) => {
+            _imgCache.set(remoteUrl, dataUrl);
+            _imgErrorCache.delete(remoteUrl);
+            return dataUrl;
+          })
+          .catch((err: any) => {
+            const message = `Image inaccessible (${err?.message || 'erreur reseau'})`;
+            _imgErrorCache.set(remoteUrl, message);
+            throw new Error(message);
+          })
+          .finally(() => _imgPending.delete(remoteUrl));
+        _imgPending.set(remoteUrl, pending);
+      }
+
+      _imgPending.get(remoteUrl)!
+        .then((dataUrl) => setSuccess(src, dataUrl))
+        .catch((err: any) => setFailure(src, err?.message || 'Image inaccessible'));
+    };
+
+    if (src.startsWith('data:')) {
+      setSuccess(src, src);
+      return;
+    }
+
+    if (src.startsWith('http://') || src.startsWith('https://')) {
+      loadRemote(src);
+      return;
+    }
+
+    const isWindowsLocal = src.startsWith('file://') || /^[a-zA-Z]:/.test(src);
+    const resolveRemoteHermes = () => {
+      if (provider === 'hermes' && agentUrl) {
+        try {
+          const parsed = new URL(agentUrl);
+          const hostUrl = `${parsed.protocol}//${parsed.host}`;
+          let relativePath = src;
+          if (src.startsWith('file://')) {
+            relativePath = src.replace(/^file:\/\/\/[a-zA-Z]:/, '').replace(/^file:\/\//, '');
+          } else if (/^[a-zA-Z]:/.test(src)) {
+            relativePath = src.substring(2);
+          }
+          relativePath = relativePath.replace(/\\/g, '/');
+          const resolvedUrl = `${hostUrl.replace(/\/$/, '')}/${relativePath.replace(/^\//, '')}`;
+          const headers: Record<string, string> = {};
+          if (hermesApiKey) headers.Authorization = `Bearer ${hermesApiKey}`;
+          if (hermesSessionKey) headers['X-Hermes-Session-Key'] = hermesSessionKey;
+          loadRemote(resolvedUrl, headers);
+        } catch {
+          setSuccess(src, src);
+        }
+      } else {
+        setSuccess(src, src);
+      }
+    };
+
+    if (isWindowsLocal && (window as any).electronAPI?.readLocalFile) {
+      let cleanPath = src;
+      if (src.startsWith('file:///')) cleanPath = src.substring(8);
+      else if (src.startsWith('file://')) cleanPath = src.substring(7);
+      cleanPath = cleanPath.replace(/\//g, '\\');
+      (window as any).electronAPI.readLocalFile(cleanPath)
+        .then((dataUrl: string) => setSuccess(src, dataUrl))
+        .catch(() => resolveRemoteHermes());
+    } else {
+      resolveRemoteHermes();
+    }
+  }, [src, agentUrl, provider, hermesApiKey, hermesSessionKey]);
+
+  if (error && !imageSrc) {
+    return (
+      <a href={src} target="_blank" rel="noopener noreferrer" className="markdown-image-error" title={src}>
+        Image impossible a charger
+      </a>
+    );
+  }
 
   return (
     <img
@@ -279,12 +487,43 @@ const createWelcomeMessage = (avatarId: EveAvatar): Message => ({
   timestamp: new Date()
 });
 
+const ToolMonitorWindow: React.FC<{
+  events: ToolEvent[];
+  isWorking: boolean;
+}> = ({ events, isWorking }) => {
+  const latestEvents = events.slice(-8).reverse();
+
+  return (
+    <div className={`tool-screen-window ${isWorking ? 'active' : ''}`}>
+      <div className="tool-screen-header">
+        <span className="tool-screen-led" />
+        <span>OUTILS HERMES</span>
+        <span>{isWorking ? 'ACTIF' : 'VEILLE'}</span>
+      </div>
+      <div className="tool-screen-body">
+        {latestEvents.length === 0 ? (
+          <div className="tool-screen-empty">Aucun outil en cours</div>
+        ) : (
+          latestEvents.map((event) => (
+            <div key={event.id} className={`tool-screen-line ${event.status}`}>
+              <span className="tool-screen-status">{event.status.toUpperCase()}</span>
+              <span className="tool-screen-text">{event.label}</span>
+              {event.detail && <span className="tool-screen-detail">{event.detail}</span>}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+};
+
 export const App: React.FC = () => {
   // --- ÉTATS ---
   const [avatarId, setAvatarId] = useState<EveAvatar>(() => getInitialAvatarId());
   const [messages, setMessages] = useState<Message[]>(() => [createWelcomeMessage(avatarId)]);
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [currentlyPlayingMsgId, setCurrentlyPlayingMsgId] = useState<string | null>(null);
 
@@ -401,9 +640,20 @@ export const App: React.FC = () => {
 
   const [availableVoices, setAvailableVoices] = useState<any[]>([]);
   const [selectedVoice, setSelectedVoice] = useState<string>('');
-  const [ttsRate, setTtsRate] = useState<number>(1.05);
+  const [ttsRate, setTtsRate] = useState<number>(1.15);
   const [sttLang, setSttLang] = useState<string>('fr-FR');
+  const [ttsProvider, setTtsProvider] = useState<'system' | 'google-free'>('google-free');
   const activeAvatar = AVATAR_PROFILES[avatarId];
+  const pushToolEvent = (event: Omit<ToolEvent, 'id' | 'ts'>) => {
+    setToolEvents(prev => [
+      ...prev.slice(-11),
+      {
+        ...event,
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        ts: Date.now()
+      }
+    ]);
+  };
 
 
 
@@ -430,7 +680,7 @@ export const App: React.FC = () => {
     speak: (text) => {
       if (!isMuted && audioServiceRef.current) {
         setIsSpeaking(true);
-        audioServiceRef.current.speak(text, selectedVoice, ttsRate).then(() => setIsSpeaking(false));
+        audioServiceRef.current.speak(text, selectedVoice, ttsRate, 1.1, ttsProvider).then(() => setIsSpeaking(false));
       }
     }
   });
@@ -504,6 +754,12 @@ export const App: React.FC = () => {
 
     persistRead('eveflow_voice').then(savedVoice => {
       if (savedVoice) setSelectedVoice(savedVoice);
+    });
+
+    persistRead('eveflow_tts_provider').then(savedProvider => {
+      if (savedProvider === 'system' || savedProvider === 'google-free') {
+        setTtsProvider(savedProvider as 'system' | 'google-free');
+      }
     });
 
     persistRead('eveflow_avatar_id').then(savedAvatar => {
@@ -580,13 +836,13 @@ export const App: React.FC = () => {
         // Trigger generic emotion for a pushed job
         setCurrentEmotion('happy');
         if (!isMuted && audioServiceRef.current) {
-          audioServiceRef.current.speak(job.result, selectedVoice, ttsRate);
+          audioServiceRef.current.speak(job.result, selectedVoice, ttsRate, 1.1, ttsProvider);
         }
       }
     });
 
     return () => pollingServiceRef.current?.stop();
-  }, [agentConfig.provider, agentConfig.hermesUrl, agentConfig.hermesApiKey, isMuted, selectedVoice, ttsRate]);
+  }, [agentConfig.provider, agentConfig.hermesUrl, agentConfig.hermesApiKey, isMuted, selectedVoice, ttsRate, ttsProvider]);
 
   // Webhook Events — mirrors all Hermes conversations (Telegram, etc.) into the chat
   useEffect(() => {
@@ -600,13 +856,14 @@ export const App: React.FC = () => {
             id: Math.random().toString(),
             role,
             content: event.text,
+            images: Array.isArray(event.images) ? event.images : undefined,
             source: source as Message['source'],
             timestamp: new Date()
           }]);
           if (role === 'assistant') {
             setCurrentEmotion('happy');
             if (!isMuted && audioServiceRef.current) {
-              audioServiceRef.current.speak(event.text, selectedVoice, ttsRate)
+              audioServiceRef.current.speak(event.text, selectedVoice, ttsRate, 1.1, ttsProvider)
                 .then(() => setIsSpeaking(false))
                 .catch(() => {});
               setIsSpeaking(true);
@@ -617,7 +874,7 @@ export const App: React.FC = () => {
       return unsubscribe;
     }
     return undefined;
-  }, [isMuted, selectedVoice, ttsRate]);
+  }, [isMuted, selectedVoice, ttsRate, ttsProvider]);
 
   // --- ACTIONS ---
   const saveConfig = (newConfig: AgentConfig) => {
@@ -646,8 +903,19 @@ export const App: React.FC = () => {
     if (!text.trim() && attachments.length === 0) return;
     if (isSending) return;
 
+    // Arrêter immédiatement toute lecture vocale en cours
+    if (audioServiceRef.current) {
+      audioServiceRef.current.stopSpeaking();
+    }
+    setIsSpeaking(false);
+
     setErrorMessage(null);
     setIsSending(true);
+    pushToolEvent({
+      label: 'Nouvelle execution Hermes',
+      detail: agentConfig.provider,
+      status: 'running'
+    });
 
     // Séparer les attachements : images vs documents texte
     const images = attachments.filter(a => a.type.startsWith('image/')).map(a => a.dataUrl);
@@ -725,7 +993,8 @@ export const App: React.FC = () => {
         ));
       };
 
-      // TTS streaming : désactivé au fil de l'eau pour gérer intelligemment les messages longs en fin de génération
+      // Index de suivi de lecture vocale pour le streaming en temps réel
+      let lastSpokenIndex = 0;
 
       const reply = await AgentService.sendMessage(
         finalPrompt,
@@ -738,9 +1007,35 @@ export const App: React.FC = () => {
           fullReply += token;
           pendingContent = fullReply;
           if (rafHandle === null) rafHandle = requestAnimationFrame(flushTokens);
+
+          // Synthèse vocale fluide phrase par phrase en temps réel (streaming)
+          if (!isMuted && audioServiceRef.current) {
+            const textToParse = fullReply.substring(lastSpokenIndex);
+            // Regex robuste pour isoler les phrases se terminant par un point, exclamation, interrogation ou saut de ligne
+            const sentenceRegex = /[^.!?\n\r]+[.!?\n\r]+/g;
+            let match;
+            let lastMatchEnd = 0;
+            while ((match = sentenceRegex.exec(textToParse)) !== null) {
+              const sentence = match[0].trim();
+              // Ignorer les tokens MEDIA: pour ne pas les lire à voix haute (ex: MEDIA:/tmp/cat.jpg)
+              if (sentence && !/^MEDIA:\s*\S+$/.test(sentence)) {
+                setIsSpeaking(true);
+                audioServiceRef.current.queueSentence(sentence, selectedVoice, ttsRate, 1.1, ttsProvider);
+              }
+              lastMatchEnd = match.index + match[0].length;
+            }
+            if (lastMatchEnd > 0) {
+              lastSpokenIndex += lastMatchEnd;
+            }
+          }
         },
         // onToolCall
-        (toolName) => {
+        (toolName, detail, status = 'running') => {
+          pushToolEvent({
+            label: toolName,
+            detail: detail || 'progression Hermes',
+            status
+          });
           setMessages(prev => prev.map(m =>
             m.id === assistantId ? { ...m, content: m.content + `\n\n> ⚙️ *${toolName}*\n\n` } : m
           ));
@@ -756,49 +1051,43 @@ export const App: React.FC = () => {
 
       const deducedEmotion = EmotionService.analyzeSentiment(reply);
       setCurrentEmotion(deducedEmotion);
+      pushToolEvent({
+        label: 'Reponse finalisee',
+        detail: `${reply.length} caracteres`,
+        status: 'done'
+      });
 
-      // Update final message
+      // Mettre à jour le message final dans le chat
       setMessages(prev => prev.map(m =>
         m.id === assistantId ? { ...m, content: reply, emotion: deducedEmotion } : m
       ));
 
-      // Synthèse vocale de fin de message intelligente (Zero Trust & asynchrone)
+      // Diction de la portion restante finale non encore prononcée
       if (!isMuted && audioServiceRef.current) {
-        setIsSpeaking(true);
-        
-        if (reply.length >= TTS_LONG_TEXT_THRESHOLD) {
-          // Si le texte est long, l'agent génère une description courte par IA en arrière-plan
-          setCurrentEmotion('thinking');
-          generateLongMessageSummary(reply)
-            .then((shortDescription) => {
-              setCurrentEmotion(deducedEmotion);
-              return audioServiceRef.current!.speak(shortDescription, selectedVoice, ttsRate);
-            })
-            .then(() => {
-              setIsSpeaking(false);
-              setCurrentEmotion('neutral');
-            })
-            .catch(() => {
-              setIsSpeaking(false);
-              setCurrentEmotion('neutral');
-            });
-        } else {
-          // Si le texte est court, lecture intégrale directe
-          audioServiceRef.current.speak(reply, selectedVoice, ttsRate)
-            .then(() => {
-              setIsSpeaking(false);
-              setCurrentEmotion('neutral');
-            })
-            .catch(() => {
-              setIsSpeaking(false);
-              setCurrentEmotion('neutral');
-            });
+        const remainingText = reply.substring(lastSpokenIndex).trim();
+        if (remainingText) {
+          setIsSpeaking(true);
+          audioServiceRef.current.queueSentence(remainingText, selectedVoice, ttsRate, 1.1, ttsProvider);
         }
+        
+        // Attendre la fin complète de la file d'écoute pour arrêter l'animation d'élocution (isSpeaking)
+        (async () => {
+          while (audioServiceRef.current?.isSpeakingActive) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+          setIsSpeaking(false);
+          setCurrentEmotion('neutral');
+        })().catch(() => {});
       }
 
     } catch (e: any) {
       setErrorMessage(e.message || "Une erreur s'est produite.");
       setCurrentEmotion('sad');
+      pushToolEvent({
+        label: 'Execution interrompue',
+        detail: e.message || 'erreur agent',
+        status: 'error'
+      });
       const errorMessageObj: Message = {
         id: Math.random().toString(),
         role: 'assistant',
@@ -852,26 +1141,7 @@ export const App: React.FC = () => {
     setCurrentEmotion('neutral');
   };
 
-  const generateLongMessageSummary = async (text: string): Promise<string> => {
-    const prompt = `Fais une description orale très courte (une seule phrase simple de maximum 12 mots) pour annoncer et résumer le texte suivant de manière agréable. Parle obligatoirement à la première personne en tant qu'assistant de l'utilisateur (ex: "Voici mon rapport de sécurité..." ou "Voici mon analyse géométrique...").\n\nTexte :\n${text}`;
-    try {
-      // Appel asynchrone direct et ultra-rapide sans historique pour le résumé
-      const result = await AgentService.sendMessage(
-        prompt,
-        [],
-        agentConfig,
-        avatarId,
-        buildCallbacks()
-      );
-      
-      // Nettoyer la réponse des guillemets superflus
-      return result.replace(/^["']|["']$/g, '').trim();
-    } catch (err) {
-      console.warn("[TTS] Échec de la description vocale IA, utilisation du fallback statique:", err);
-      const wordCount = text.split(/\s+/).filter(Boolean).length;
-      return `Voici ma transmission contenant environ ${wordCount} mots. Vous pouvez lancer son écoute audio complète à l'aide du bouton de lecture au bas du message.`;
-    }
-  };
+
 
   const handlePlayLongMessage = (messageId: string, content: string) => {
     if (!audioServiceRef.current) return;
@@ -894,7 +1164,7 @@ export const App: React.FC = () => {
       const deducedEmotion = EmotionService.analyzeSentiment(content);
       setCurrentEmotion(deducedEmotion);
 
-      audioServiceRef.current.speak(content, selectedVoice, ttsRate)
+      audioServiceRef.current.speak(content, selectedVoice, ttsRate, 1.1, ttsProvider)
         .then(() => {
           setCurrentlyPlayingMsgId(null);
           setIsSpeaking(false);
@@ -1030,11 +1300,13 @@ export const App: React.FC = () => {
                         remarkPlugins={[remarkGfm]}
                         components={{
                           img: ({ node, ...props }) => (
-                            <LocalImage 
+                            <ResilientImage 
                               src={props.src || ''} 
                               alt={props.alt} 
                               agentUrl={agentConfig.hermesUrl} 
-                              provider={agentConfig.provider} 
+                              provider={agentConfig.provider}
+                              hermesApiKey={agentConfig.hermesApiKey}
+                              hermesSessionKey={agentConfig.hermesSessionKey}
                             />
                           ),
                           a: ({ node, ...props }) => {
@@ -1067,18 +1339,20 @@ export const App: React.FC = () => {
                           }
                         }}
                       >
-                        {msg.content}
+                        {preprocessMessageContent(msg.content)}
                       </ReactMarkdown>
 
                       {msg.images && msg.images.length > 0 && (
                         <div className="message-images-gallery" style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                           {msg.images.map((imgUrl, i) => (
-                            <LocalImage 
+                            <ResilientImage 
                               key={i} 
                               src={imgUrl} 
                               alt="Image jointe" 
                               agentUrl={agentConfig.hermesUrl} 
-                              provider={agentConfig.provider} 
+                              provider={agentConfig.provider}
+                              hermesApiKey={agentConfig.hermesApiKey}
+                              hermesSessionKey={agentConfig.hermesSessionKey}
                             />
                           ))}
                         </div>
@@ -1382,23 +1656,71 @@ export const App: React.FC = () => {
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div>
-                  <label className="label-title">Voix Synthétique Locale</label>
-                  <select 
-                    value={selectedVoice}
-                    onChange={(e) => {
-                      setSelectedVoice(e.target.value);
-                      persistWrite('eveflow_voice', e.target.value);
-                    }}
-                    className="glow-input"
-                    style={{ padding: '8px 12px', fontSize: '12px' }}
-                  >
-                    {availableVoices.map((voice) => (
-                      <option key={voice.name} value={voice.name}>
-                        {voice.name} ({voice.lang})
-                      </option>
-                    ))}
-                  </select>
+                  <label className="label-title">Type de Synthèse Vocale</label>
+                  <div className="grid-2" style={{ gap: '10px', marginTop: '4px' }}>
+                    <button
+                      onClick={() => {
+                        setTtsProvider('google-free');
+                        persistWrite('eveflow_tts_provider', 'google-free');
+                      }}
+                      className="neon-btn"
+                      style={{
+                        padding: '8px 12px',
+                        fontSize: '11px',
+                        background: ttsProvider === 'google-free' ? '' : 'transparent',
+                        border: ttsProvider === 'google-free' ? 'none' : '1px solid #cbd5e1',
+                        color: ttsProvider === 'google-free' ? 'white' : '#64748b',
+                        boxShadow: ttsProvider === 'google-free' ? '' : 'none'
+                      }}
+                    >
+                      🟢 Voix Naturelle (Ligne)
+                    </button>
+                    <button
+                      onClick={() => {
+                        setTtsProvider('system');
+                        persistWrite('eveflow_tts_provider', 'system');
+                      }}
+                      className="neon-btn"
+                      style={{
+                        padding: '8px 12px',
+                        fontSize: '11px',
+                        background: ttsProvider === 'system' ? '' : 'transparent',
+                        border: ttsProvider === 'system' ? 'none' : '1px solid #cbd5e1',
+                        color: ttsProvider === 'system' ? 'white' : '#64748b',
+                        boxShadow: ttsProvider === 'system' ? '' : 'none'
+                      }}
+                    >
+                      🔌 Voix Système (Local)
+                    </button>
+                  </div>
                 </div>
+
+                {ttsProvider === 'system' && (
+                  <div>
+                    <label className="label-title">Voix Synthétique Locale</label>
+                    <select 
+                      value={selectedVoice}
+                      onChange={(e) => {
+                        setSelectedVoice(e.target.value);
+                        persistWrite('eveflow_voice', e.target.value);
+                      }}
+                      className="glow-input"
+                      style={{ padding: '8px 12px', fontSize: '12px' }}
+                    >
+                      {availableVoices.map((voice) => (
+                        <option key={voice.name} value={voice.name}>
+                          {voice.name} ({voice.lang})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {ttsProvider === 'google-free' && (
+                  <div style={{ padding: '8px 12px', backgroundColor: 'var(--accent-light)', border: '1px solid rgba(0,212,245,0.2)', borderRadius: '10px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-neon)', lineHeight: 1.5 }}>
+                    ℹ️ **Mode Voix Naturelle Actif** : EveFlow utilise la voix neuronale ultra-fluide et humaine de Google. Aucun frais ni clé API requis. En cas de perte de connexion, elle basculera automatiquement sur votre voix locale hors-ligne.
+                  </div>
+                )}
 
                 <div className="grid-2">
                   <div>
@@ -1431,7 +1753,7 @@ export const App: React.FC = () => {
                   onClick={() => {
                     if (audioServiceRef.current) {
                       setIsSpeaking(true);
-                      audioServiceRef.current.speak(activeAvatar.welcome, selectedVoice, ttsRate)
+                      audioServiceRef.current.speak(activeAvatar.welcome, selectedVoice, ttsRate, 1.1, ttsProvider)
                         .then(() => setIsSpeaking(false));
                     }
                   }}
@@ -1447,6 +1769,16 @@ export const App: React.FC = () => {
 
         {/* COMPAGNON 3D SECTION (De droite) */}
         <section className={`eve-section ${isFloatingMode ? 'floating-widget' : ''}`}>
+          <div className={`avatar-ambient-field ${currentEmotion === 'thinking' || isSending ? 'thinking' : 'idle'}`}>
+            <span className="ambient-scanline scanline-a" />
+            <span className="ambient-scanline scanline-b" />
+            <span className="ambient-data data-a" />
+            <span className="ambient-data data-b" />
+            <span className="ambient-data data-c" />
+            <span className="ambient-node node-a" />
+            <span className="ambient-node node-b" />
+            <span className="ambient-node node-c" />
+          </div>
           
           {/* Header flottant discret pour contrôle en mode Widget */}
           {isFloatingMode && (
@@ -1479,7 +1811,17 @@ export const App: React.FC = () => {
 
           {/* Rendu Canvas 3D */}
           <div style={{ flex: 1, width: '100%', position: 'relative' }}>
-            <ThreeCanvas emotion={currentEmotion} isSpeaking={isSpeaking} avatarId={avatarId} />
+            <ThreeCanvas
+              emotion={currentEmotion}
+              isSpeaking={isSpeaking}
+              avatarId={avatarId}
+            />
+            {agentConfig.provider === 'hermes' && (
+              <ToolMonitorWindow
+                events={toolEvents}
+                isWorking={isSending}
+              />
+            )}
             {avatarId !== 'eve' && activeAvatar.assetPath && (
               <div style={{ position: 'absolute', top: '16px', left: '50%', transform: 'translateX(-50%)', padding: '7px 14px', borderRadius: '18px', backgroundColor: 'var(--bg-secondary)', border: '1px solid rgba(0,212,245,0.25)', boxShadow: '0 0 20px rgba(0,212,245,0.1)', fontSize: '9px', fontFamily: 'var(--font-mono)', fontWeight: 800, letterSpacing: '0.8px', color: 'var(--text-secondary)', textTransform: 'uppercase', pointerEvents: 'none' }}>
                 {activeAvatar.name}: asset premium attendu

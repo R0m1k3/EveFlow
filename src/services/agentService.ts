@@ -47,7 +47,7 @@ export class AgentService {
     avatarId: EveAvatar = 'eve',
     callbacks?: AppCallbacks,
     onToken?: (token: string) => void,
-    onToolCall?: (toolName: string) => void,
+    onToolCall?: (toolName: string, detail?: string, status?: 'running' | 'done' | 'error') => void,
     sessionId?: string,
     onSessionIdChange?: (newSessionId: string) => void,
     images?: string[]
@@ -63,7 +63,18 @@ export class AgentService {
     // inject the avatar character prompt as before.
     let updatedHistory: { role: 'user' | 'assistant' | 'system'; content: string }[];
     if (config.provider === 'hermes') {
-      updatedHistory = history.map(h => ({ role: h.role as 'user' | 'assistant' | 'system', content: h.content }));
+      updatedHistory = [
+        {
+          role: 'system' as const,
+          content: [
+            'Platform: EveFlow desktop chat, connected through the OpenAI-compatible API, not a Hermes messaging gateway.',
+            'Do not use MEDIA:/path tags for images or files here: those are only intercepted by Telegram/Discord/Slack gateways and local paths are not web-accessible in EveFlow.',
+            'When showing an internet image, return a normal Markdown image with a public http(s) URL: ![alt](https://...).',
+            'When creating a diagram or SVG for EveFlow, use the generate_shared_image tool so the app writes it locally and can display it.'
+          ].join(' ')
+        },
+        ...history.map(h => ({ role: h.role as 'user' | 'assistant' | 'system', content: h.content }))
+      ];
     } else {
       const systemPrompt = this.getSystemPromptForAvatar(avatarId);
       updatedHistory = [
@@ -138,7 +149,7 @@ export class AgentService {
     config: AgentConfig,
     callbacks?: AppCallbacks,
     onToken?: (token: string) => void,
-    onToolCall?: (toolName: string) => void,
+    onToolCall?: (toolName: string, detail?: string, status?: 'running' | 'done' | 'error') => void,
     sessionId?: string,
     onSessionIdChange?: (newSessionId: string) => void,
     images?: string[]
@@ -261,7 +272,7 @@ export class AgentService {
           for (const tc of assistantMsg.tool_calls) {
             const toolName: string = tc.function?.name || 'unknown';
             LogService.info('HermesAgent', `Tool call: ${toolName}`, tc.function?.arguments);
-            onToolCall?.(toolName);
+            onToolCall?.(toolName, tc.function?.arguments, 'running');
 
             const result = await executeTool(tc.id, toolName, tc.function?.arguments || '{}', callbacks!);
             messages.push(result);
@@ -295,7 +306,7 @@ export class AgentService {
     onToken: (token: string) => void,
     messages: any[],
     callbacks: AppCallbacks | undefined,
-    onToolCall: ((name: string) => void) | undefined,
+    onToolCall: ((name: string, detail?: string, status?: 'running' | 'done' | 'error') => void) | undefined,
     endpoint: string,
     headers: Record<string, string>,
     model: string
@@ -305,6 +316,7 @@ export class AgentService {
     let fullContent = '';
     let buffer = '';
     const pendingToolCalls: Record<string, any> = {};
+    let sseEvent = 'message';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -315,12 +327,34 @@ export class AgentService {
       buffer = lines.pop() ?? '';
 
       for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          sseEvent = line.slice(7).trim() || 'message';
+          continue;
+        }
+
         if (!line.startsWith('data: ')) continue;
         const jsonStr = line.slice(6).trim();
-        if (jsonStr === '[DONE]') break;
+        if (jsonStr === '[DONE]') {
+          sseEvent = 'message';
+          break;
+        }
 
         try {
           const chunk = JSON.parse(jsonStr);
+
+          if (sseEvent === 'hermes.tool.progress') {
+            const tool = String(chunk.tool || chunk.name || chunk.label || 'outil');
+            const label = String(chunk.label || chunk.preview || tool);
+            const emoji = chunk.emoji ? `${chunk.emoji} ` : '';
+            const detail = [chunk.preview, chunk.args, chunk.skill, chunk.toolset]
+              .filter(Boolean)
+              .map((value: any) => typeof value === 'string' ? value : JSON.stringify(value))
+              .join(' | ');
+            onToolCall?.(`${emoji}${label}`, detail || tool, 'running');
+            sseEvent = 'message';
+            continue;
+          }
+
           const delta = chunk.choices?.[0]?.delta;
           const finishReason = chunk.choices?.[0]?.finish_reason;
 
@@ -348,7 +382,7 @@ export class AgentService {
             for (const tc of Object.values(pendingToolCalls) as any[]) {
               const toolName = tc.function?.name;
               LogService.info('HermesAgent', `[stream] Tool call: ${toolName}`);
-              onToolCall?.(toolName);
+              onToolCall?.(toolName, tc.function?.arguments, 'running');
               const result = await executeTool(tc.id, toolName, tc.function?.arguments || '{}', callbacks);
               messages.push(result);
             }

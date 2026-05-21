@@ -28,4 +28,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeSharedFile: (filename, content, isBase64) => ipcRenderer.invoke('write-shared-file', filename, content, isBase64),
   // Ouverture de fichier local
   openLocalFile: (filePath) => ipcRenderer.invoke('open-local-file', filePath),
+  // Chargement d'une image distante via Node.js (contourne CORS \u2014 retourne une Data URL base64)
+  fetchRemoteImage: (url, extraHeaders = {}) => ipcRenderer.invoke('fetch-remote-image', url, extraHeaders),
 });

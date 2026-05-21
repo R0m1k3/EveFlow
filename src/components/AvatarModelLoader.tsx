@@ -58,7 +58,7 @@ const LoadedGlbAvatar: React.FC<{
     }
   });
 
-  return <primitive object={scene} scale={1} />;
+  return <primitive object={scene} scale={0.48} />;
 };
 
 export const AvatarModelLoader: React.FC<AvatarModelLoaderProps> = ({ avatarId, emotion, isSpeaking }) => {

@@ -85,7 +85,17 @@ export class PollingService {
         return;
       }
 
-      const jobs: HermesJob[] = await response.json();
+      const payload = await response.json();
+      const jobs: HermesJob[] = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.jobs)
+          ? payload.jobs
+          : [];
+
+      if (!Array.isArray(jobs)) {
+        LogService.warn('PollingService', 'Format /api/jobs inattendu', { preview: JSON.stringify(payload).slice(0, 200) });
+        return;
+      }
 
       for (const job of jobs) {
         if (job.status === 'completed' && job.id && !this.seenJobIds.has(job.id)) {
