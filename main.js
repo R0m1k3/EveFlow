@@ -6,6 +6,7 @@ const os = require('os');
 // Autoriser le chargement de fichiers locaux via fetch sous le protocole file://
 app.commandLine.appendSwitch('disable-web-security');
 app.commandLine.appendSwitch('allow-file-access-from-files');
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 let mainWindow;
 
@@ -232,6 +233,7 @@ function createWindow() {
       nodeIntegration: false,
       webSecurity: false,          // Permet les requêtes HTTP vers API locales/LAN
       allowRunningInsecureContent: true, // Autorise HTTP depuis le renderer (API locales)
+      backgroundThrottling: false, // Empêche Chromium de suspendre les processus audio/TTS en arrière-plan
     },
   });
 
@@ -306,17 +308,17 @@ ipcMain.on('window-control', (event, action) => {
 ipcMain.on('set-window-mode', (event, mode) => {
   if (!mainWindow) return;
   if (mode === 'floating') {
-    // Mode flottant compact : 320x450
+    // Mode flottant compact : 300x550
     mainWindow.setResizable(true);
     mainWindow.setMinimumSize(250, 350);
-    mainWindow.setSize(300, 460);
+    mainWindow.setSize(300, 550);
     mainWindow.setAlwaysOnTop(true, 'screen-saver');
     
     // Positionner dans le coin inférieur droit de l'écran principal
     const { screen } = require('electron');
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height } = primaryDisplay.workAreaSize;
-    mainWindow.setPosition(width - 320, height - 480);
+    mainWindow.setPosition(width - 320, height - 570);
     
     event.reply('window-mode-changed', 'floating');
   } else {
