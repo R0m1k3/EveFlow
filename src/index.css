@@ -2769,7 +2769,7 @@ select.glow-input {
 }
 
 .eve-section.floating-widget > div[style*="position: relative"] {
-  height: 300px !important;
+  height: 360px !important;
   flex: none !important;
 }
 

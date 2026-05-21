@@ -308,17 +308,17 @@ ipcMain.on('window-control', (event, action) => {
 ipcMain.on('set-window-mode', (event, mode) => {
   if (!mainWindow) return;
   if (mode === 'floating') {
-    // Mode flottant compact : 300x550
+    // Mode flottant compact : 300x600
     mainWindow.setResizable(true);
     mainWindow.setMinimumSize(250, 350);
-    mainWindow.setSize(300, 550);
+    mainWindow.setSize(300, 600);
     mainWindow.setAlwaysOnTop(true, 'screen-saver');
     
     // Positionner dans le coin inférieur droit de l'écran principal
     const { screen } = require('electron');
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height } = primaryDisplay.workAreaSize;
-    mainWindow.setPosition(width - 320, height - 570);
+    mainWindow.setPosition(width - 320, height - 620);
     
     event.reply('window-mode-changed', 'floating');
   } else {
