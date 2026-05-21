@@ -1805,7 +1805,7 @@ export const App: React.FC = () => {
                       </div>
                       <div className="message-row assistant">
                         <div className="avatar-wrapper">
-                          <img src="/avatars/eve-round.png" alt={activeAvatar.name} className="avatar-img" />
+                          <img src="./avatars/eve-round.png" alt={activeAvatar.name} className="avatar-img" />
                         </div>
                         <div className="message-bubble assistant">
                           {markdownAndMedia}
