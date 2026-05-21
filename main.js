@@ -199,10 +199,10 @@ async function loadApp() {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1000,
-    height: 700,
-    minWidth: 400,
-    minHeight: 500,
+    width: 1120,
+    height: 860,
+    minWidth: 900,
+    minHeight: 680,
     frame: false, // Supprime la barre de titre classique pour un style rétro-futuriste personnalisé
     transparent: true, // Permet la transparence (fond de fenêtre transparent)
     backgroundColor: '#00000000', // Fond transparent
@@ -294,12 +294,36 @@ ipcMain.on('set-window-mode', (event, mode) => {
   } else {
     // Mode normal : chat complet
     mainWindow.setAlwaysOnTop(false);
-    mainWindow.setMinimumSize(400, 500);
-    mainWindow.setSize(1000, 700);
+    mainWindow.setMinimumSize(900, 680);
+    mainWindow.setSize(1120, 860);
     mainWindow.center();
     
     event.reply('window-mode-changed', 'normal');
   }
+});
+
+// IPC Handler pour ouvrir/fermer le cockpit sans ecraser Eve.
+ipcMain.on('set-cockpit-mode', (_event, isOpen) => {
+  if (!mainWindow) return;
+  if (mainWindow.isMaximized()) return;
+
+  const { screen } = require('electron');
+  const display = screen.getDisplayMatching(mainWindow.getBounds());
+  const workArea = display.workArea;
+  const bounds = mainWindow.getBounds();
+  const targetWidth = isOpen ? 1460 : 1120;
+  const nextWidth = Math.min(targetWidth, Math.max(900, workArea.width - 40));
+  const nextHeight = Math.min(Math.max(bounds.height, 820), workArea.height - 40);
+  const nextX = Math.min(bounds.x, workArea.x + workArea.width - nextWidth - 20);
+  const nextY = Math.min(bounds.y, workArea.y + workArea.height - nextHeight - 20);
+
+  mainWindow.setMinimumSize(isOpen ? 1180 : 900, 680);
+  mainWindow.setBounds({
+    x: Math.max(workArea.x + 20, nextX),
+    y: Math.max(workArea.y + 20, nextY),
+    width: nextWidth,
+    height: nextHeight
+  }, true);
 });
 
 // ── IPC Handler : écriture des logs du renderer vers disque ─────────────────

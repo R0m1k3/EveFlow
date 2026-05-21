@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   windowControl: (action) => ipcRenderer.send('window-control', action),
   setWindowMode: (mode) => ipcRenderer.send('set-window-mode', mode),
+  setCockpitMode: (isOpen) => ipcRenderer.send('set-cockpit-mode', isOpen),
   onWindowModeChanged: (callback) => {
     const subscription = (event, mode) => callback(mode);
     ipcRenderer.on('window-mode-changed', subscription);

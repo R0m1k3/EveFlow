@@ -22,7 +22,11 @@ const LoadedGlbAvatar: React.FC<{
   isSpeaking: boolean;
 }> = ({ path, avatarId, emotion, isSpeaking }) => {
   const gltf = useLoader(GLTFLoader, path);
-  const scene = useMemo(() => gltf.scene.clone(true), [gltf.scene]);
+  const scene = useMemo(() => {
+    const cloned = gltf.scene.clone(true);
+    cloned.position.y = 0.27;
+    return cloned;
+  }, [gltf.scene]);
 
   useEffect(() => {
     const style = EmotionService.getEmotionStyle(emotion, avatarId);
@@ -48,7 +52,7 @@ const LoadedGlbAvatar: React.FC<{
 
   useFrame((state) => {
     const t = state.clock.getElapsedTime();
-    scene.position.y = Math.sin(t * 1.4) * 0.05 + 0.22;
+    scene.position.y = Math.sin(t * 1.4) * 0.05 + 0.27;
     scene.rotation.y = Math.sin(t * 0.45) * 0.05;
 
     if (isSpeaking) {

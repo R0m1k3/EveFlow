@@ -3,9 +3,10 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Send, Mic, MicOff, Settings, MessageSquare, Volume2, VolumeX,
-  Sparkles, Cpu, Minimize2, X, AlertCircle, StopCircle, Paperclip,
+  Cpu, Minimize2, X, AlertCircle, StopCircle, Paperclip,
   CalendarClock, History, Wrench, Play, Pause, RefreshCw, Trash2, Plus,
-  CheckCircle2, WifiOff, Edit3, Save
+  CheckCircle2, WifiOff, Edit3, Save, ChevronUp, ExternalLink,
+  BriefcaseBusiness, AlertTriangle
 } from 'lucide-react';
 import { ThreeCanvas, ToolEvent } from './components/ThreeCanvas';
 import { AudioService } from './services/audioService';
@@ -13,7 +14,6 @@ import { AgentService, AgentConfig, AgentProvider } from './services/agentServic
 import { EmotionService, EveAvatar, EveEmotion } from './services/emotionService';
 import { HermesJob, HermesJobDraft, PollingService } from './services/pollingService';
 import { AppCallbacks } from './services/toolRegistry';
-import { version } from '../package.json';
 
 interface Message {
   id: string;
@@ -585,6 +585,7 @@ const HermesCockpitWindow: React.FC<{
   onRun: (job: HermesJob) => void;
   onDelete: (job: HermesJob) => void;
   onOpenRun: (run: HermesRunRecord) => void;
+  onClose: () => void;
 }> = ({
   events,
   isWorking,
@@ -606,7 +607,8 @@ const HermesCockpitWindow: React.FC<{
   onResume,
   onRun,
   onDelete,
-  onOpenRun
+  onOpenRun,
+  onClose
 }) => {
   const latestEvents = events.slice(-8).reverse();
   const [activeTab, setActiveTab] = useState<HermesCockpitTab>('tools');
@@ -726,9 +728,14 @@ const HermesCockpitWindow: React.FC<{
       <div className="tool-screen-header">
         <span className={`tool-screen-led ${syncState}`} />
         <span>COCKPIT HERMES</span>
-        <button className="hermes-icon-btn" onClick={onRefresh} title="Synchroniser Hermes">
-          <RefreshCw size={12} />
-        </button>
+        <div className="hermes-header-actions">
+          <button className="hermes-icon-btn" onClick={onRefresh} title="Synchroniser Hermes">
+            <RefreshCw size={12} />
+          </button>
+          <button className="hermes-icon-btn" onClick={onClose} title="Refermer le cockpit Hermes">
+            <X size={12} />
+          </button>
+        </div>
       </div>
       <div className="hermes-cockpit-status">
         {syncState === 'offline' ? <WifiOff size={12} /> : <CheckCircle2 size={12} />}
@@ -863,11 +870,12 @@ export const App: React.FC = () => {
   const [currentEmotion, setCurrentEmotion] = useState<EveEmotion>('neutral');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted] = useState(false);
 
   // Fenêtre & Navigation
   const [isFloatingMode, setIsFloatingMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showHermesCockpit, setShowHermesCockpit] = useState(false);
 
   // Paramètres d'Agents et de Voix (sauvegardés localement)
   const [agentConfig, setAgentConfig] = useState<AgentConfig>({
@@ -886,6 +894,12 @@ export const App: React.FC = () => {
   const [sttLang, setSttLang] = useState<string>('fr-FR');
   const [ttsProvider, setTtsProvider] = useState<'system' | 'google-free'>('google-free');
   const activeAvatar = AVATAR_PROFILES[avatarId];
+  const hermesUnreadRuns = hermesRunHistory.filter(run => !run.read).length;
+  const hermesSyncLabel = hermesSyncState === 'offline'
+    ? 'Hermes offline'
+    : hermesSyncState === 'syncing'
+      ? 'Hermes sync'
+      : 'Hermes OK';
   const pushToolEvent = (event: Omit<ToolEvent, 'id' | 'ts'>) => {
     setToolEvents(prev => [
       ...prev.slice(-11),
@@ -1296,6 +1310,17 @@ export const App: React.FC = () => {
     }
   };
 
+  const toggleHermesCockpit = () => {
+    const nextOpen = !showHermesCockpit;
+    setShowHermesCockpit(nextOpen);
+    window.electronAPI?.setCockpitMode?.(nextOpen);
+  };
+
+  const closeHermesCockpit = () => {
+    setShowHermesCockpit(false);
+    window.electronAPI?.setCockpitMode?.(false);
+  };
+
   const handleSendMessage = async (text: string) => {
     if (!text.trim() && attachments.length === 0) return;
     if (isSending) return;
@@ -1540,6 +1565,8 @@ export const App: React.FC = () => {
 
 
 
+
+
   const handlePlayLongMessage = (messageId: string, content: string) => {
     if (!audioServiceRef.current) return;
 
@@ -1567,8 +1594,8 @@ export const App: React.FC = () => {
           setIsSpeaking(false);
           setCurrentEmotion('neutral');
         })
-        .catch((err) => {
-          console.error("[TTS] Échec de la lecture audio complète :", err);
+        .catch(err => {
+          console.error("Long message audio speak error:", err);
           setCurrentlyPlayingMsgId(null);
           setIsSpeaking(false);
           setCurrentEmotion('neutral');
@@ -1576,84 +1603,55 @@ export const App: React.FC = () => {
     }
   };
 
-
-
   return (
     <div className={`app-container ${isFloatingMode ? 'transparent-bg' : ''}`}>
-      
       {/* 1. APP HEADER */}
       {!isFloatingMode && (
         <header className="app-header" style={{ WebkitAppRegion: 'drag' } as any}>
-          <div className="flex-row">
-            <div className="h-3 w-3 rounded-full pulsing-led" style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: activeAvatar.accent, boxShadow: `0 0 12px ${activeAvatar.accent}` }}></div>
-            <h1 className="neon-title" style={{ fontFamily: 'var(--font-title)', letterSpacing: '2px', color: 'var(--text-primary)', fontSize: '18px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '10px', lineHeight: 1 }}>
-              EVEFLOW
-              <span className="header-subtitle" style={{ color: 'var(--text-secondary)', fontWeight: 500, fontSize: '14px' }}>// ANALOG SPACE OS</span>
-              <span className="sys-ready-badge" style={{ fontSize: '9px', padding: '3px 10px', backgroundColor: 'var(--accent-light)', color: 'var(--text-neon)', border: '1px solid rgba(0,212,245,0.4)', borderRadius: '20px', fontWeight: 'bold', fontFamily: 'var(--font-mono)' }}>SYS_READY_V{version}</span>
-            </h1>
+          <div className="flex-row" style={{ display: 'flex', alignItems: 'center', gap: '6px', WebkitAppRegion: 'no-drag' } as any}>
+            <span className="logo-dot" />
+            <span className="logo-text">EVEFLOW</span>
           </div>
 
-          <div className="flex-row" style={{ WebkitAppRegion: 'no-drag' } as any}>
-            {/* Statut Agent */}
-            <div className="flex-row agent-status-badge" style={{ padding: '6px 14px', backgroundColor: 'var(--bg-primary)', fontSize: '11px', fontWeight: '800', color: 'var(--text-neon)', border: '2px solid var(--text-primary)', borderRadius: '20px', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-              <Cpu style={{ width: '13px', height: '13px', color: 'var(--accent-cyan)' }} />
-              <span>[ RECEIVER: {agentConfig.provider} ]</span>
+          {agentConfig.provider === 'hermes' && (
+            <div className="header-hermes-status" style={{
+              color: hermesSyncState === 'offline' ? '#ef4444' : '#10b981',
+              borderColor: hermesSyncState === 'offline' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(0, 242, 255, 0.2)',
+              WebkitAppRegion: 'no-drag'
+            } as any}>
+              <span className="status-dot" style={{
+                backgroundColor: hermesSyncState === 'offline' ? '#ef4444' : '#10b981',
+                boxShadow: hermesSyncState === 'offline' ? '0 0 10px #ef4444' : '0 0 10px #10b981'
+              }} />
+              <span>{hermesSyncState === 'offline' ? 'Hermes OFFLINE' : 'Hermes OK'}</span>
             </div>
+          )}
 
-            {/* Sourdine */}
-            <button 
-              onClick={() => {
-                if (audioServiceRef.current && isSpeaking) {
-                  audioServiceRef.current.stopSpeaking();
-                  setIsSpeaking(false);
-                }
-                setIsMuted(!isMuted);
-              }}
-              className="glow-input"
-              style={{ padding: '8px 12px', width: 'auto', borderRadius: '20px', display: 'flex', alignItems: 'center', cursor: 'pointer', borderColor: isMuted ? '#ef4444' : 'rgba(0,212,245,0.3)', backgroundColor: isMuted ? 'rgba(239,68,68,0.15)' : 'var(--bg-secondary)' }}
-              title={isMuted ? `Activer la voix de ${activeAvatar.name}` : `Couper la voix de ${activeAvatar.name}`}
-            >
-              {isMuted ? <VolumeX style={{ width: '16px', height: '16px', color: '#ef4444' }} /> : <Volume2 style={{ width: '16px', height: '16px', color: 'var(--text-primary)' }} />}
-            </button>
-
-            {/* Paramètres */}
-            <button 
+          <div className="window-controls" style={{ WebkitAppRegion: 'no-drag' } as any}>
+            <button
+              className="control-btn"
               onClick={() => setShowSettings(!showSettings)}
-              className="glow-input"
-              style={{ padding: '8px 12px', width: 'auto', borderRadius: '20px', display: 'flex', alignItems: 'center', cursor: 'pointer', borderColor: showSettings ? 'var(--accent-cyan)' : 'rgba(0,212,245,0.3)', backgroundColor: showSettings ? 'var(--accent-light)' : 'var(--bg-secondary)' }}
-              title="Paramètres de configuration"
+              title="Configuration globale"
             >
-              <Settings style={{ width: '16px', height: '16px', color: 'var(--text-primary)' }} />
+              <Settings size={16} />
             </button>
-
-            {/* Mode Widget Flottant */}
-            <button 
-              onClick={toggleWindowMode}
-              className="glow-input"
-              style={{ padding: '8px 12px', width: 'auto', borderRadius: '20px', borderColor: 'rgba(0,212,245,0.3)', backgroundColor: 'var(--bg-secondary)', display: 'flex', alignItems: 'center', cursor: 'pointer' }}
-              title="Activer le mode compagnon flottant"
-            >
-              <Minimize2 style={{ width: '16px', height: '16px', color: 'var(--text-primary)' }} />
-            </button>
-
-            {/* Electron Controls */}
             {window.electronAPI && (
-              <div className="flex-row" style={{ borderLeft: '2px solid var(--text-primary)', paddingLeft: '12px' }}>
-                <button 
-                  onClick={() => handleWindowControl('minimize')} 
-                  className="glow-input"
-                  style={{ padding: '8px 12px', width: 'auto', cursor: 'pointer', border: 'none', background: 'transparent', color: 'var(--text-primary)', fontWeight: 'bold' }}
+              <>
+                <button
+                  className="control-btn"
+                  onClick={() => handleWindowControl('minimize')}
+                  title="Réduire"
                 >
-                  —
+                  <Minimize2 size={16} />
                 </button>
-                <button 
-                  onClick={() => handleWindowControl('close')} 
-                  className="glow-input"
-                  style={{ padding: '8px 12px', width: 'auto', cursor: 'pointer', border: 'none', background: 'transparent', color: '#ef4444', fontWeight: 'bold' }}
+                <button
+                  className="control-btn close"
+                  onClick={() => handleWindowControl('close')}
+                  title="Fermer"
                 >
-                  <X style={{ width: '16px', height: '16px' }} />
+                  <X size={16} />
                 </button>
-              </div>
+              </>
             )}
           </div>
         </header>
@@ -1661,130 +1659,165 @@ export const App: React.FC = () => {
 
       {/* 2. MAIN LAYOUT CONTAINER */}
       <div className="app-main">
-
         {/* CHAT SECTION (De gauche) */}
         {!isFloatingMode && !showSettings && (
           <section className="chat-section">
-            <div className="messages-container">
-              {messages.map((msg) => (
-                <div 
-                  key={msg.id} 
-                  className={`message-row ${msg.role === 'user' ? 'user' : 'assistant'}`}
+            {agentConfig.provider === 'hermes' && (
+              <div className="chat-status-bar">
+                <div className={`status-item ${hermesSyncState === 'offline' ? 'red' : 'green'}`}>
+                  {hermesSyncState === 'offline' ? <WifiOff size={14} /> : <CheckCircle2 size={14} />}
+                  <span>{hermesSyncLabel}</span>
+                </div>
+                <span className="status-separator">|</span>
+                <div className="status-item blue">
+                  <BriefcaseBusiness size={14} />
+                  <span>{hermesJobs.length} job{hermesJobs.length > 1 ? 's' : ''}</span>
+                </div>
+                <span className="status-separator">|</span>
+                <div className={`status-item ${hermesUnreadRuns > 0 ? 'red' : 'blue'}`}>
+                  <AlertTriangle size={14} />
+                  <span>{hermesUnreadRuns} alerte{hermesUnreadRuns > 1 ? 's' : ''}</span>
+                </div>
+                <button
+                  className="cockpit-btn"
+                  onClick={toggleHermesCockpit}
+                  title={showHermesCockpit ? 'Refermer le cockpit Hermes' : 'Ouvrir le cockpit Hermes'}
                 >
-                  <div className={`message-bubble ${msg.role === 'user' ? 'user' : 'assistant'}`}>
-                    {msg.role === 'assistant' ? (
-                      <div className="message-meta" style={{ fontFamily: 'var(--font-mono)', letterSpacing: '1.5px', color: 'var(--text-neon)', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                        <Sparkles style={{ width: '12px', height: '12px', color: 'var(--accent-cyan)', flexShrink: 0 }} />
-                        <span>[TRANSMISSION: {activeAvatar.name.toUpperCase()} // TELEMETRY: {msg.emotion?.toUpperCase() || 'NEUTRAL'}]</span>
-                        {msg.source && msg.source !== 'eveflow' && (
-                          <span style={{ fontSize: '9px', padding: '2px 7px', backgroundColor: 'rgba(0,212,245,0.15)', border: '1px solid rgba(0,212,245,0.35)', borderRadius: '10px', color: 'var(--accent-cyan)', fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase' }}>
-                            {msg.source}
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="message-meta" style={{ fontFamily: 'var(--font-mono)', letterSpacing: '1.5px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                        <span>[TELECOMMANDE // CONSOLE_INPUT]</span>
-                        {msg.source && msg.source !== 'eveflow' && (
-                          <span style={{ fontSize: '9px', padding: '2px 7px', backgroundColor: 'rgba(255,160,0,0.15)', border: '1px solid rgba(255,160,0,0.35)', borderRadius: '10px', color: '#ffb84d', fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase' }}>
-                            {msg.source}
-                          </span>
-                        )}
+                  <span>Cockpit</span>
+                  <ChevronUp size={12} className={`chevron ${showHermesCockpit ? 'rotated' : ''}`} />
+                </button>
+              </div>
+            )}
+            <div className="messages-container">
+              {messages.map((msg) => {
+                const isUser = msg.role === 'user';
+                
+                const markdownAndMedia = (
+                  <div className="markdown-content">
+                    <ReactMarkdown 
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        img: ({ node, ...props }) => (
+                          <ResilientImage 
+                            src={props.src || ''} 
+                            alt={props.alt} 
+                            agentUrl={agentConfig.hermesUrl} 
+                            provider={agentConfig.provider}
+                            hermesApiKey={agentConfig.hermesApiKey}
+                            hermesSessionKey={agentConfig.hermesSessionKey}
+                          />
+                        ),
+                        a: ({ node, ...props }) => {
+                          const isLocal = props.href?.startsWith('file://') || /^[a-zA-Z]:/.test(props.href || '');
+                          if (isLocal) {
+                            return (
+                              <a 
+                                href="#" 
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  let cleanPath = props.href || '';
+                                  if (cleanPath.startsWith('file:///')) {
+                                    cleanPath = cleanPath.substring(8);
+                                  } else if (cleanPath.startsWith('file://')) {
+                                    cleanPath = cleanPath.substring(7);
+                                  }
+                                  cleanPath = cleanPath.replace(/\//g, '\\');
+                                  (window as any).electronAPI?.openLocalFile?.(cleanPath)
+                                    .catch((err: any) => console.error("Impossible d'ouvrir le fichier :", err));
+                                }}
+                                className="markdown-link-local"
+                                style={{ color: 'var(--text-neon)', textDecoration: 'underline', fontWeight: 'bold' }}
+                                title={`Ouvrir le fichier local : ${props.href}`}
+                              >
+                                {props.children}
+                              </a>
+                            );
+                          }
+                          return <a href={props.href} target="_blank" rel="noopener noreferrer">{props.children}</a>;
+                        }
+                      }}
+                    >
+                      {preprocessMessageContent(msg.content)}
+                    </ReactMarkdown>
+
+                    {msg.images && msg.images.length > 0 && (
+                      <div className="message-images-gallery" style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {msg.images.map((imgUrl, i) => (
+                          <ResilientImage 
+                            key={i} 
+                            src={imgUrl} 
+                            alt="Image jointe" 
+                            agentUrl={agentConfig.hermesUrl} 
+                            provider={agentConfig.provider}
+                            hermesApiKey={agentConfig.hermesApiKey}
+                            hermesSessionKey={agentConfig.hermesSessionKey}
+                          />
+                        ))}
                       </div>
                     )}
-                    <div className="markdown-content">
-                      <ReactMarkdown 
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          img: ({ node, ...props }) => (
-                            <ResilientImage 
-                              src={props.src || ''} 
-                              alt={props.alt} 
-                              agentUrl={agentConfig.hermesUrl} 
-                              provider={agentConfig.provider}
-                              hermesApiKey={agentConfig.hermesApiKey}
-                              hermesSessionKey={agentConfig.hermesSessionKey}
-                            />
-                          ),
-                          a: ({ node, ...props }) => {
-                            const isLocal = props.href?.startsWith('file://') || /^[a-zA-Z]:/.test(props.href || '');
-                            if (isLocal) {
-                              return (
-                                <a 
-                                  href="#" 
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    let cleanPath = props.href || '';
-                                    if (cleanPath.startsWith('file:///')) {
-                                      cleanPath = cleanPath.substring(8);
-                                    } else if (cleanPath.startsWith('file://')) {
-                                      cleanPath = cleanPath.substring(7);
-                                    }
-                                    cleanPath = cleanPath.replace(/\//g, '\\');
-                                    (window as any).electronAPI?.openLocalFile?.(cleanPath)
-                                      .catch((err: any) => console.error("Impossible d'ouvrir le fichier :", err));
-                                  }}
-                                  className="markdown-link-local"
-                                  style={{ color: 'var(--text-neon)', textDecoration: 'underline', fontWeight: 'bold' }}
-                                  title={`Ouvrir le fichier local : ${props.href}`}
-                                >
-                                  {props.children}
-                                </a>
-                              );
-                            }
-                            return <a href={props.href} target="_blank" rel="noopener noreferrer">{props.children}</a>;
-                          }
-                        }}
-                      >
-                        {preprocessMessageContent(msg.content)}
-                      </ReactMarkdown>
 
-                      {msg.images && msg.images.length > 0 && (
-                        <div className="message-images-gallery" style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                          {msg.images.map((imgUrl, i) => (
-                            <ResilientImage 
-                              key={i} 
-                              src={imgUrl} 
-                              alt="Image jointe" 
-                              agentUrl={agentConfig.hermesUrl} 
-                              provider={agentConfig.provider}
-                              hermesApiKey={agentConfig.hermesApiKey}
-                              hermesSessionKey={agentConfig.hermesSessionKey}
-                            />
-                          ))}
-                        </div>
-                      )}
-
-                      {msg.role === 'assistant' && msg.content.length >= TTS_LONG_TEXT_THRESHOLD && (
-                        <div className="long-message-audio-controls">
-                          <button
-                            onClick={() => handlePlayLongMessage(msg.id, msg.content)}
-                            className={`audio-control-btn ${currentlyPlayingMsgId === msg.id ? 'playing' : ''}`}
-                            title={currentlyPlayingMsgId === msg.id ? "Arrêter la lecture vocale complète" : "Écouter la lecture vocale complète"}
-                          >
-                            {currentlyPlayingMsgId === msg.id ? (
-                              <>
-                                <VolumeX style={{ width: '13px', height: '13px' }} />
-                                <span>[ STOP_AUDIO ]</span>
-                              </>
-                            ) : (
-                              <>
-                                <Volume2 style={{ width: '13px', height: '13px' }} />
-                                <span>[ LIRE_MESSAGE_COMPLET ]</span>
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    <span className="message-time">
-                      {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
+                    {!isUser && msg.content.length >= TTS_LONG_TEXT_THRESHOLD && (
+                      <div className="long-message-audio-controls">
+                        <button
+                          onClick={() => handlePlayLongMessage(msg.id, msg.content)}
+                          className={`audio-control-btn ${currentlyPlayingMsgId === msg.id ? 'playing' : ''}`}
+                          title={currentlyPlayingMsgId === msg.id ? "Arrêter la lecture vocale complète" : "Écouter la lecture vocale complète"}
+                        >
+                          {currentlyPlayingMsgId === msg.id ? (
+                            <>
+                              <VolumeX style={{ width: '13px', height: '13px' }} />
+                              <span>[ STOP_AUDIO ]</span>
+                            </>
+                          ) : (
+                            <>
+                              <Volume2 style={{ width: '13px', height: '13px' }} />
+                              <span>[ LIRE_MESSAGE_COMPLET ]</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
-              
+                );
 
+                if (isUser) {
+                  return (
+                    <div key={msg.id} className="message-row user">
+                      <div className="message-bubble user">
+                        {markdownAndMedia}
+                        <div className="message-time">
+                          <span>{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          <span className="double-check">✓✓</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                } else {
+                  return (
+                    <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+                      <div className="transmission-tag">
+                        # [TRANSMISSION: {activeAvatar.name.toUpperCase()} // TELEMETRY: {msg.emotion?.toUpperCase() || 'NEUTRAL'}]
+                        {msg.source && msg.source !== 'eveflow' && (
+                          <span style={{ marginLeft: '8px', fontSize: '9px', padding: '1px 6px', backgroundColor: 'rgba(0,212,245,0.15)', border: '1px solid rgba(0,212,245,0.35)', borderRadius: '10px', color: 'var(--accent-cyan)', fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase' }}>
+                            {msg.source}
+                          </span>
+                        )}
+                      </div>
+                      <div className="message-row assistant">
+                        <div className="avatar-wrapper">
+                          <img src="/avatars/eve-round.png" alt={activeAvatar.name} className="avatar-img" />
+                        </div>
+                        <div className="message-bubble assistant">
+                          {markdownAndMedia}
+                          <div className="message-time" style={{ color: 'rgba(226, 240, 255, 0.4)', fontSize: '9px', marginTop: '6px', textAlign: 'right' }}>
+                            {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+              })}
 
               {errorMessage && (
                 <div className="settings-card" style={{ backgroundColor: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.4)', color: '#ff6b6b', padding: '16px', display: 'flex', flexDirection: 'row', gap: '12px', alignItems: 'flex-start' }}>
@@ -1848,7 +1881,7 @@ export const App: React.FC = () => {
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSendMessage(inputText)}
-                placeholder="Tape ton message ici..."
+                placeholder="Message a Eve..."
                 className="glow-input"
                 disabled={isSending}
               />
@@ -1857,14 +1890,10 @@ export const App: React.FC = () => {
               {isSpeaking && (
                 <button
                   onClick={handleStopTTS}
-                  className="glow-input"
+                  className="input-circle-btn"
                   style={{
-                    padding: '12px',
-                    width: 'auto',
-                    cursor: 'pointer',
                     borderColor: '#ef4444',
-                    backgroundColor: 'rgba(239,68,68,0.15)',
-                    flexShrink: 0
+                    backgroundColor: 'rgba(239, 68, 68, 0.15)',
                   }}
                   title="Arrêter la lecture vocale"
                 >
@@ -1874,42 +1903,35 @@ export const App: React.FC = () => {
 
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="glow-input"
+                className="input-circle-btn"
                 style={{
-                  padding: '12px',
-                  width: 'auto',
-                  cursor: 'pointer',
-                  borderColor: attachments.length > 0 ? 'var(--accent-cyan)' : 'var(--text-primary)',
-                  backgroundColor: attachments.length > 0 ? 'var(--accent-light)' : 'var(--bg-secondary)',
-                  flexShrink: 0
+                  borderColor: attachments.length > 0 ? 'var(--accent-cyan)' : 'rgba(226, 240, 255, 0.12)',
+                  backgroundColor: attachments.length > 0 ? 'rgba(0, 242, 255, 0.1)' : '#050914',
                 }}
                 title="Ajouter des pièces jointes (Images, Fichiers texte...)"
               >
-                <Paperclip style={{ width: '18px', height: '18px', color: attachments.length > 0 ? 'var(--accent-cyan)' : 'var(--text-primary)' }} />
+                <Paperclip style={{ width: '18px', height: '18px', color: attachments.length > 0 ? 'var(--accent-cyan)' : 'var(--text-secondary)' }} />
               </button>
 
               <button
                 onClick={isListening ? handleStopListening : handleStartVocalRecord}
-                className="glow-input"
+                className="input-circle-btn"
                 style={{
-                  padding: '12px',
-                  width: 'auto',
-                  cursor: 'pointer',
-                  borderColor: isListening ? '#ef4444' : 'var(--text-primary)',
-                  backgroundColor: isListening ? 'rgba(239,68,68,0.15)' : 'var(--bg-secondary)'
+                  borderColor: isListening ? '#ef4444' : 'rgba(226, 240, 255, 0.12)',
+                  backgroundColor: isListening ? 'rgba(239, 68, 68, 0.15)' : '#050914'
                 }}
                 title={isListening ? "Arrêter l'écoute" : "Démarrer la saisie vocale"}
               >
-                {isListening ? <MicOff style={{ width: '18px', height: '18px', color: '#ef4444' }} /> : <Mic style={{ width: '18px', height: '18px', color: 'var(--text-primary)' }} />}
+                {isListening ? <MicOff style={{ width: '18px', height: '18px', color: '#ef4444' }} /> : <Mic style={{ width: '18px', height: '18px', color: 'var(--text-secondary)' }} />}
               </button>
 
               <button
                 onClick={() => handleSendMessage(inputText)}
                 disabled={(!inputText.trim() && attachments.length === 0) || isSending}
-                className="neon-btn"
+                className="input-send-btn"
+                title="Envoyer le message"
               >
-                <Send style={{ width: '14px', height: '14px' }} />
-                <span className="btn-text">Envoyer</span>
+                <Send style={{ width: '16px', height: '16px' }} />
               </button>
             </div>
           </section>
@@ -2165,17 +2187,21 @@ export const App: React.FC = () => {
         )}
 
         {/* COMPAGNON 3D SECTION (De droite) */}
-        <section className={`eve-section ${isFloatingMode ? 'floating-widget' : ''}`}>
-          <div className={`avatar-ambient-field ${currentEmotion === 'thinking' || isSending ? 'thinking' : 'idle'}`}>
-            <span className="ambient-scanline scanline-a" />
-            <span className="ambient-scanline scanline-b" />
-            <span className="ambient-data data-a" />
-            <span className="ambient-data data-b" />
-            <span className="ambient-data data-c" />
-            <span className="ambient-node node-a" />
-            <span className="ambient-node node-b" />
-            <span className="ambient-node node-c" />
-          </div>
+        <section className={`eve-section ${isFloatingMode ? 'floating-widget' : ''} ${isListening || isSpeaking || isSending ? 'eve-active' : ''}`}>
+          {!isFloatingMode && (
+            <div className="eve-status-pill">
+              <span className="status-led" />
+              <span>{isListening ? 'Eve ecoute' : isSpeaking ? 'Eve parle' : isSending ? 'Eve reflechit' : 'Eve ecoute'}</span>
+            </div>
+          )}
+
+          {!isFloatingMode && (
+            <button onClick={toggleWindowMode} className="eve-popout-btn" title="Mode Widget flottant">
+              <ExternalLink size={14} />
+            </button>
+          )}
+
+
           
           {/* Header flottant discret pour contrôle en mode Widget */}
           {isFloatingMode && (
@@ -2207,37 +2233,12 @@ export const App: React.FC = () => {
           )}
 
           {/* Rendu Canvas 3D */}
-          <div style={{ flex: 1, width: '100%', position: 'relative' }}>
+          <div style={{ flex: 1, width: '100%', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <ThreeCanvas
               emotion={currentEmotion}
               isSpeaking={isSpeaking}
               avatarId={avatarId}
             />
-            {agentConfig.provider === 'hermes' && (
-              <HermesCockpitWindow
-                events={toolEvents}
-                isWorking={isSending}
-                jobs={hermesJobs}
-                runs={hermesRunHistory}
-                syncState={hermesSyncState}
-                syncDetail={hermesSyncDetail}
-                lastSyncAt={hermesLastSyncAt}
-                draft={hermesCronDraft}
-                editingJobId={editingHermesJobId}
-                isSaving={isSavingHermesCron}
-                onDraftChange={setHermesCronDraft}
-                onCreate={handleCreateHermesCron}
-                onCancelEdit={handleCancelEditHermesCron}
-                onStartEdit={handleStartEditHermesCron}
-                onUpdate={handleUpdateHermesCron}
-                onRefresh={refreshHermesJobs}
-                onPause={(job) => runHermesCronAction(job, 'pause')}
-                onResume={(job) => runHermesCronAction(job, 'resume')}
-                onRun={(job) => runHermesCronAction(job, 'run')}
-                onDelete={(job) => runHermesCronAction(job, 'delete')}
-                onOpenRun={openHermesRunInChat}
-              />
-            )}
             {avatarId !== 'eve' && activeAvatar.assetPath && (
               <div style={{ position: 'absolute', top: '16px', left: '50%', transform: 'translateX(-50%)', padding: '7px 14px', borderRadius: '18px', backgroundColor: 'var(--bg-secondary)', border: '1px solid rgba(0,212,245,0.25)', boxShadow: '0 0 20px rgba(0,212,245,0.1)', fontSize: '9px', fontFamily: 'var(--font-mono)', fontWeight: 800, letterSpacing: '0.8px', color: 'var(--text-secondary)', textTransform: 'uppercase', pointerEvents: 'none' }}>
                 {activeAvatar.name}: asset premium attendu
@@ -2245,7 +2246,7 @@ export const App: React.FC = () => {
             )}
 
             {/* Badge d'humeur en bas */}
-            {!isFloatingMode && (
+            {!isFloatingMode && false && (
               <div style={{ position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)', padding: '8px 20px', borderRadius: '30px', backgroundColor: 'var(--bg-secondary)', border: '2px solid var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 15px rgba(45, 30, 24, 0.08)', fontSize: '12px', fontWeight: '700' }}>
                 <span className="h-3 w-3 rounded-full pulsing-led" style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: activeAvatar.accent, boxShadow: `0 0 10px ${activeAvatar.accent}` }}></span>
                 <span style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', fontSize: '9px', letterSpacing: '1px', fontFamily: 'var(--font-title)' }}>Humeur:</span>
@@ -2281,7 +2282,36 @@ export const App: React.FC = () => {
               </div>
             </div>
           )}
+
+
         </section>
+
+        {!isFloatingMode && !showSettings && agentConfig.provider === 'hermes' && showHermesCockpit && (
+          <HermesCockpitWindow
+            events={toolEvents}
+            isWorking={isSending}
+            jobs={hermesJobs}
+            runs={hermesRunHistory}
+            syncState={hermesSyncState}
+            syncDetail={hermesSyncDetail}
+            lastSyncAt={hermesLastSyncAt}
+            draft={hermesCronDraft}
+            editingJobId={editingHermesJobId}
+            isSaving={isSavingHermesCron}
+            onDraftChange={setHermesCronDraft}
+            onCreate={handleCreateHermesCron}
+            onCancelEdit={handleCancelEditHermesCron}
+            onStartEdit={handleStartEditHermesCron}
+            onUpdate={handleUpdateHermesCron}
+            onRefresh={refreshHermesJobs}
+            onPause={(job) => runHermesCronAction(job, 'pause')}
+            onResume={(job) => runHermesCronAction(job, 'resume')}
+            onRun={(job) => runHermesCronAction(job, 'run')}
+            onDelete={(job) => runHermesCronAction(job, 'delete')}
+            onOpenRun={openHermesRunInChat}
+            onClose={closeHermesCockpit}
+          />
+        )}
 
       </div>
     </div>

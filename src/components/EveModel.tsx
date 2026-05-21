@@ -555,8 +555,8 @@ export const EveModel: React.FC<EveModelProps> = ({ emotion, isSpeaking, avatarI
     
     // 1. Animation globale de flottaison (Lévitation magnétique)
     if (modelRef.current) {
-      // Oscillation en hauteur stabilisée autour de y = 0.22 (remonté pour un centrage élégant)
-      modelRef.current.position.y = Math.sin(t * 1.5) * 0.06 + 0.22;
+      // Oscillation en hauteur stabilisée autour de y = 0.27 pour mieux occuper la fenetre avatar.
+      modelRef.current.position.y = Math.sin(t * 1.5) * 0.06 + 0.27;
       // Légère rotation sur elle-même (mouvement de veille)
       modelRef.current.rotation.y = Math.sin(t * 0.5) * 0.05;
     }
@@ -760,7 +760,7 @@ export const EveModel: React.FC<EveModelProps> = ({ emotion, isSpeaking, avatarI
   });
 
   return (
-    <group ref={modelRef} scale={1.0} position={[0, -0.28, 0]}>
+    <group ref={modelRef} scale={1.0} position={[0, 0.27, 0]}>
       <primitive object={clonedObj} />
     </group>
   );
