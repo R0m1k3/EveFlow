@@ -12,16 +12,7 @@
 
 Découvrez le cockpit de contrôle immersif et le mode widget compact d'EveFlow :
 
-<table>
-  <tr>
-    <td align="center"><strong>Cockpit Principal (Mode Discussion & Télémétrie)</strong></td>
-    <td align="center"><strong>Widget Flottant (Mode Compact Transparent)</strong></td>
-  </tr>
-  <tr>
-    <td><img src="public/screenshots/cockpit_view.png" width="500" alt="EveFlow Cockpit View"/></td>
-    <td><img src="public/screenshots/compact_widget.png" width="300" alt="EveFlow Compact Widget"/></td>
-  </tr>
-</table>
+
 
 ---
 
