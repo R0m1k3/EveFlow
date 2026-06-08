@@ -275,6 +275,13 @@ app.whenReady().then(() => {
     callback(false);
   });
 
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
+    if (permission === 'media') {
+      return true;
+    }
+    return false;
+  });
+
   startWebhookServer();
   createWindow();
 

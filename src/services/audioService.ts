@@ -113,6 +113,19 @@ export class AudioService {
     }
   }
 
+  private logInfo(tag: string, message: string, data?: any) {
+    console.log(`[${tag}] ${message}`, data);
+    if ((window as any).electronAPI?.writeLog) {
+      (window as any).electronAPI.writeLog({
+        ts: new Date().toISOString(),
+        level: 'INFO',
+        tag,
+        message,
+        data: data ? { message: data.message, stack: data.stack, ...data } : undefined
+      });
+    }
+  }
+
   constructor() {
     this.ttsSynth = window.speechSynthesis;
     this.initSTT();
@@ -622,7 +635,18 @@ export class AudioService {
 
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       this.audioContext = new AudioCtx();
+      
+      // Assurer que l'AudioContext est actif (non suspendu)
+      if (this.audioContext.state === 'suspended') {
+        this.logWarn("STT", "AudioContext initialisé à l'état suspendu. Tentative de reprise...");
+        await this.audioContext.resume();
+      }
+      
       this.sampleRate = this.audioContext.sampleRate;
+      this.logInfo("STT", "AudioContext démarré avec succès", {
+        state: this.audioContext.state,
+        sampleRate: this.sampleRate
+      });
 
       const source = this.audioContext.createMediaStreamSource(stream);
       // bufferSize de 2048, 1 canal d'entrée, 1 de sortie
@@ -686,6 +710,12 @@ export class AudioService {
 
     // Exporter le tampon audio en fichier WAV
     const wavBlob = this.exportWAV(this.leftChannel, this.recordingLength, this.sampleRate);
+    
+    this.logInfo("STT", "Arrêt de l'écoute, exportation WAV...", {
+      recordingLength: this.recordingLength,
+      sampleRate: this.sampleRate,
+      wavSize: wavBlob.size
+    });
 
     this.transcribeAudioWithAPI(wavBlob, lang)
       .then(text => {
@@ -699,14 +729,19 @@ export class AudioService {
 
   // Fonctions utilitaires pour générer le conteneur WAV PCM 16-bit
   private exportWAV(channelData: Float32Array[], recordingLength: number, sampleRate: number): Blob {
-    const buffer = this.mergeBuffers(channelData, recordingLength);
-    const wavBuffer = new ArrayBuffer(44 + buffer.length * 2);
+    const originalBuffer = this.mergeBuffers(channelData, recordingLength);
+    
+    // Rééchantillonner à 16000 Hz pour la compatibilité avec l'API ASR (Whisper / Qwen3-ASR)
+    const targetSampleRate = 16000;
+    const resampledBuffer = this.downsampleBuffer(originalBuffer, sampleRate, targetSampleRate);
+    
+    const wavBuffer = new ArrayBuffer(44 + resampledBuffer.length * 2);
     const view = new DataView(wavBuffer);
 
     /* Identifiant RIFF */
     this.writeString(view, 0, 'RIFF');
     /* Taille du fichier */
-    view.setUint32(4, 36 + buffer.length * 2, true);
+    view.setUint32(4, 36 + resampledBuffer.length * 2, true);
     /* Type RIFF */
     this.writeString(view, 8, 'WAVE');
     /* Identifiant format fmt */
@@ -718,9 +753,9 @@ export class AudioService {
     /* Nombre de canaux (1 = Mono) */
     view.setUint16(22, 1, true);
     /* Fréquence d'échantillonnage */
-    view.setUint32(24, sampleRate, true);
-    /* Débit d'octets (sampleRate * blockAlign) */
-    view.setUint32(28, sampleRate * 2, true);
+    view.setUint32(24, targetSampleRate, true);
+    /* Débit d'octets (targetSampleRate * blockAlign) */
+    view.setUint32(28, targetSampleRate * 2, true);
     /* Block align (1 canal * 2 octets par échantillon) */
     view.setUint16(32, 2, true);
     /* Bits par échantillon (16 bits) */
@@ -728,11 +763,47 @@ export class AudioService {
     /* Identifiant de données data */
     this.writeString(view, 36, 'data');
     /* Longueur des données audio */
-    view.setUint32(40, buffer.length * 2, true);
+    view.setUint32(40, resampledBuffer.length * 2, true);
 
-    this.floatTo16BitPCM(view, 44, buffer);
+    this.floatTo16BitPCM(view, 44, resampledBuffer);
 
     return new Blob([view], { type: 'audio/wav' });
+  }
+
+  private downsampleBuffer(buffer: Float32Array, originalSampleRate: number, targetSampleRate: number): Float32Array {
+    if (originalSampleRate === targetSampleRate) {
+      return buffer;
+    }
+    
+    const sampleRateRatio = originalSampleRate / targetSampleRate;
+    const newLength = Math.round(buffer.length / sampleRateRatio);
+    const result = new Float32Array(newLength);
+    
+    let offsetResult = 0;
+    let offsetBuffer = 0;
+    
+    while (offsetResult < result.length) {
+      const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+      
+      // Moyennage simple (box filter) pour éviter l'aliasing
+      let accum = 0;
+      let count = 0;
+      for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+        accum += buffer[i];
+        count++;
+      }
+      
+      if (count > 0) {
+        result[offsetResult] = accum / count;
+      } else {
+        result[offsetResult] = buffer[Math.min(offsetBuffer, buffer.length - 1)];
+      }
+      
+      offsetResult++;
+      offsetBuffer = nextOffsetBuffer;
+    }
+    
+    return result;
   }
 
   private mergeBuffers(channelData: Float32Array[], recordingLength: number): Float32Array {

@@ -2543,6 +2543,27 @@ export const App: React.FC = () => {
                 <div ref={compactMessagesEndRef} />
               </div>
 
+              {errorMessage && (
+                <div style={{
+                  backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.35)',
+                  borderRadius: '8px',
+                  color: '#ff6b6b',
+                  padding: '6px 10px',
+                  fontSize: '10px',
+                  display: 'flex',
+                  gap: '6px',
+                  alignItems: 'center',
+                  boxShadow: '0 0 10px rgba(239, 68, 68, 0.05)'
+                }}>
+                  <AlertCircle style={{ width: '13px', height: '13px', flexShrink: 0, color: '#ef4444' }} />
+                  <div style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={errorMessage}>
+                    <strong style={{ textTransform: 'uppercase', marginRight: '4px' }}>DÉFAILLANCE:</strong>
+                    {errorMessage}
+                  </div>
+                </div>
+              )}
+
               {/* Barre de saisie compacte */}
               <div style={{ display: 'flex', gap: '6px', alignItems: 'center', width: '100%', paddingBottom: '2px' }}>
                 <input
