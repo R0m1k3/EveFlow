@@ -892,7 +892,18 @@ export const App: React.FC = () => {
   const [selectedVoice, setSelectedVoice] = useState<string>('');
   const [ttsRate, setTtsRate] = useState<number>(1.15);
   const [sttLang, setSttLang] = useState<string>('fr-FR');
-  const [ttsProvider, setTtsProvider] = useState<'system' | 'google-free'>('google-free');
+  const [ttsProvider, setTtsProvider] = useState<'system' | 'google-free' | 'openai-tts'>('google-free');
+
+  // Configuration personnalisée de l'API Speech-To-Text (ASR) et Text-To-Speech (TTS)
+  const [sttProvider, setSttProvider] = useState<'browser' | 'qwen3-asr'>('browser');
+  const [sttApiUrl, setSttApiUrl] = useState<string>('http://127.0.0.1:8000/v1');
+  const [sttApiKey, setSttApiKey] = useState<string>('');
+  const [sttModel, setSttModel] = useState<string>('qwen3-asr');
+
+  const [ttsApiUrl, setTtsApiUrl] = useState<string>('http://127.0.0.1:8000/v1');
+  const [ttsApiKey, setTtsApiKey] = useState<string>('');
+  const [ttsModel, setTtsModel] = useState<string>('tts-1');
+
   const activeAvatar = AVATAR_PROFILES[avatarId];
   const hermesUnreadRuns = hermesRunHistory.filter(run => !run.read).length;
   const hermesSyncLabel = hermesSyncState === 'offline'
@@ -1136,6 +1147,8 @@ export const App: React.FC = () => {
   // --- INITIALISATION ---
   useEffect(() => {
     const service = new AudioService();
+    service.updateSTTConfig(sttProvider, sttApiUrl, sttApiKey, sttModel);
+    service.updateTTSConfig(ttsApiUrl, ttsApiKey, ttsModel);
     audioServiceRef.current = service;
 
     // Charger la configuration depuis le store persistant (IPC fichier > localStorage)
@@ -1159,9 +1172,31 @@ export const App: React.FC = () => {
     });
 
     persistRead('eveflow_tts_provider').then(savedProvider => {
-      if (savedProvider === 'system' || savedProvider === 'google-free') {
-        setTtsProvider(savedProvider as 'system' | 'google-free');
+      if (savedProvider === 'system' || savedProvider === 'google-free' || savedProvider === 'openai-tts') {
+        setTtsProvider(savedProvider as 'system' | 'google-free' | 'openai-tts');
       }
+    });
+
+    persistRead('eveflow_stt_provider').then(val => {
+      if (val === 'browser' || val === 'qwen3-asr') setSttProvider(val as 'browser' | 'qwen3-asr');
+    });
+    persistRead('eveflow_stt_api_url').then(val => {
+      if (val) setSttApiUrl(val);
+    });
+    persistRead('eveflow_stt_api_key').then(val => {
+      if (val) setSttApiKey(val);
+    });
+    persistRead('eveflow_stt_model').then(val => {
+      if (val) setSttModel(val);
+    });
+    persistRead('eveflow_tts_api_url').then(val => {
+      if (val) setTtsApiUrl(val);
+    });
+    persistRead('eveflow_tts_api_key').then(val => {
+      if (val) setTtsApiKey(val);
+    });
+    persistRead('eveflow_tts_model').then(val => {
+      if (val) setTtsModel(val);
     });
 
     persistRead('eveflow_avatar_id').then(savedAvatar => {
@@ -1220,6 +1255,49 @@ export const App: React.FC = () => {
 
     return undefined;
   }, []);
+
+  // Synchroniser la configuration de AudioService avec l'état React
+  useEffect(() => {
+    if (audioServiceRef.current) {
+      audioServiceRef.current.updateSTTConfig(sttProvider, sttApiUrl, sttApiKey, sttModel);
+    }
+  }, [sttProvider, sttApiUrl, sttApiKey, sttModel]);
+
+  useEffect(() => {
+    if (audioServiceRef.current) {
+      audioServiceRef.current.updateTTSConfig(ttsApiUrl, ttsApiKey, ttsModel);
+    }
+  }, [ttsApiUrl, ttsApiKey, ttsModel]);
+
+  const handleSttProviderChange = (val: 'browser' | 'qwen3-asr') => {
+    setSttProvider(val);
+    persistWrite('eveflow_stt_provider', val);
+  };
+  const handleSttApiUrlChange = (val: string) => {
+    setSttApiUrl(val);
+    persistWrite('eveflow_stt_api_url', val);
+  };
+  const handleSttApiKeyChange = (val: string) => {
+    setSttApiKey(val);
+    persistWrite('eveflow_stt_api_key', val);
+  };
+  const handleSttModelChange = (val: string) => {
+    setSttModel(val);
+    persistWrite('eveflow_stt_model', val);
+  };
+
+  const handleTtsApiUrlChange = (val: string) => {
+    setTtsApiUrl(val);
+    persistWrite('eveflow_tts_api_url', val);
+  };
+  const handleTtsApiKeyChange = (val: string) => {
+    setTtsApiKey(val);
+    persistWrite('eveflow_tts_api_key', val);
+  };
+  const handleTtsModelChange = (val: string) => {
+    setTtsModel(val);
+    persistWrite('eveflow_tts_model', val);
+  };
 
   // Défilement automatique
   useEffect(() => {
@@ -2069,7 +2147,7 @@ export const App: React.FC = () => {
 
             </div>
 
-            {/* B. TTS / STT */}
+            {/* B. TTS (Synthese Vocale / Voice Reader) */}
             <div className="settings-card">
               <h3 className="label-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <Volume2 style={{ width: '14px', height: '14px' }} /> Voix de {activeAvatar.name} (Text-to-Speech)
@@ -2078,7 +2156,7 @@ export const App: React.FC = () => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div>
                   <label className="label-title">Type de Synthèse Vocale</label>
-                  <div className="grid-2" style={{ gap: '10px', marginTop: '4px' }}>
+                  <div className="grid-3" style={{ gap: '10px', marginTop: '4px' }}>
                     <button
                       onClick={() => {
                         setTtsProvider('google-free');
@@ -2113,6 +2191,23 @@ export const App: React.FC = () => {
                     >
                       🔌 Voix Système (Local)
                     </button>
+                    <button
+                      onClick={() => {
+                        setTtsProvider('openai-tts');
+                        persistWrite('eveflow_tts_provider', 'openai-tts');
+                      }}
+                      className="neon-btn"
+                      style={{
+                        padding: '8px 12px',
+                        fontSize: '11px',
+                        background: ttsProvider === 'openai-tts' ? '' : 'transparent',
+                        border: ttsProvider === 'openai-tts' ? 'none' : '1px solid #cbd5e1',
+                        color: ttsProvider === 'openai-tts' ? 'white' : '#64748b',
+                        boxShadow: ttsProvider === 'openai-tts' ? '' : 'none'
+                      }}
+                    >
+                      🌐 API Personnalisée
+                    </button>
                   </div>
                 </div>
 
@@ -2140,6 +2235,63 @@ export const App: React.FC = () => {
                 {ttsProvider === 'google-free' && (
                   <div style={{ padding: '8px 12px', backgroundColor: 'var(--accent-light)', border: '1px solid rgba(0,212,245,0.2)', borderRadius: '10px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-neon)', lineHeight: 1.5 }}>
                     ℹ️ **Mode Voix Naturelle Actif** : EveFlow utilise la voix neuronale ultra-fluide et humaine de Google. Aucun frais ni clé API requis. En cas de perte de connexion, elle basculera automatiquement sur votre voix locale hors-ligne.
+                  </div>
+                )}
+
+                {ttsProvider === 'openai-tts' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div>
+                      <label className="label-title">URL de l'API TTS</label>
+                      <input 
+                        type="text" 
+                        value={ttsApiUrl}
+                        onChange={(e) => handleTtsApiUrlChange(e.target.value)}
+                        className="glow-input"
+                        style={{ padding: '8px 12px', fontSize: '12px' }}
+                        placeholder="Ex: http://127.0.0.1:8000/v1"
+                      />
+                      <span style={{ display: 'block', marginTop: '5px', fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                        ℹ️ L'endpoint <code>/v1/audio/speech</code> sera utilisé pour la synthèse.
+                      </span>
+                    </div>
+                    <div className="grid-2">
+                      <div>
+                        <label className="label-title">Modèle TTS</label>
+                        <input 
+                          type="text" 
+                          value={ttsModel}
+                          onChange={(e) => handleTtsModelChange(e.target.value)}
+                          className="glow-input"
+                          style={{ padding: '8px 12px', fontSize: '12px' }}
+                          placeholder="tts-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="label-title">Clé API (Optionnel)</label>
+                        <input 
+                          type="password" 
+                          value={ttsApiKey}
+                          onChange={(e) => handleTtsApiKeyChange(e.target.value)}
+                          className="glow-input"
+                          style={{ padding: '8px 12px', fontSize: '12px' }}
+                          placeholder="Bearer token (API_KEY)"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="label-title">Nom de la Voix (ex: alloy, onyx, nova)</label>
+                      <input 
+                        type="text" 
+                        value={selectedVoice}
+                        onChange={(e) => {
+                          setSelectedVoice(e.target.value);
+                          persistWrite('eveflow_voice', e.target.value);
+                        }}
+                        className="glow-input"
+                        style={{ padding: '8px 12px', fontSize: '12px' }}
+                        placeholder="alloy"
+                      />
+                    </div>
                   </div>
                 )}
 
@@ -2183,6 +2335,98 @@ export const App: React.FC = () => {
                 >
                   Tester la voix de {activeAvatar.name}
                 </button>
+              </div>
+            </div>
+
+            {/* C. STT (Reconnaissance Vocale) */}
+            <div className="settings-card">
+              <h3 className="label-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Mic style={{ width: '14px', height: '14px' }} /> Reconnaissance Vocale (Speech-to-Text)
+              </h3>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <label className="label-title">Moteur de Reconnaissance Vocale</label>
+                  <div className="grid-2" style={{ gap: '10px', marginTop: '4px' }}>
+                    <button
+                      onClick={() => handleSttProviderChange('browser')}
+                      className="neon-btn"
+                      style={{
+                        padding: '8px 12px',
+                        fontSize: '11px',
+                        background: sttProvider === 'browser' ? '' : 'transparent',
+                        border: sttProvider === 'browser' ? 'none' : '1px solid #cbd5e1',
+                        color: sttProvider === 'browser' ? 'white' : '#64748b',
+                        boxShadow: sttProvider === 'browser' ? '' : 'none'
+                      }}
+                    >
+                      🟢 Moteur Navigateur (Local)
+                    </button>
+                    <button
+                      onClick={() => handleSttProviderChange('qwen3-asr')}
+                      className="neon-btn"
+                      style={{
+                        padding: '8px 12px',
+                        fontSize: '11px',
+                        background: sttProvider === 'qwen3-asr' ? '' : 'transparent',
+                        border: sttProvider === 'qwen3-asr' ? 'none' : '1px solid #cbd5e1',
+                        color: sttProvider === 'qwen3-asr' ? 'white' : '#64748b',
+                        boxShadow: sttProvider === 'qwen3-asr' ? '' : 'none'
+                      }}
+                    >
+                      🌐 Qwen3 ASR (API)
+                    </button>
+                  </div>
+                </div>
+
+                {sttProvider === 'browser' && (
+                  <div style={{ padding: '8px 12px', backgroundColor: 'var(--accent-light)', border: '1px solid rgba(0,212,245,0.2)', borderRadius: '10px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-neon)', lineHeight: 1.5 }}>
+                    ℹ️ **Mode Navigateur Actif** : Utilise l'API de reconnaissance vocale standard intégrée à votre système (locale, rapide et gratuite).
+                  </div>
+                )}
+
+                {sttProvider === 'qwen3-asr' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div>
+                      <label className="label-title">URL de l'API STT</label>
+                      <input 
+                        type="text" 
+                        value={sttApiUrl}
+                        onChange={(e) => handleSttApiUrlChange(e.target.value)}
+                        className="glow-input"
+                        style={{ padding: '8px 12px', fontSize: '12px' }}
+                        placeholder="Ex: http://127.0.0.1:8000/v1"
+                      />
+                      <span style={{ display: 'block', marginTop: '5px', fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                        ℹ️ L'endpoint <code>/v1/audio/transcriptions</code> sera utilisé pour la transcription.
+                      </span>
+                    </div>
+                    <div className="grid-2">
+                      <div>
+                        <label className="label-title">Modèle ASR</label>
+                        <input 
+                          type="text" 
+                          value={sttModel}
+                          onChange={(e) => handleSttModelChange(e.target.value)}
+                          className="glow-input"
+                          style={{ padding: '8px 12px', fontSize: '12px' }}
+                          placeholder="qwen3-asr"
+                        />
+                      </div>
+                      <div>
+                        <label className="label-title">Clé API (Optionnel)</label>
+                        <input 
+                          type="password" 
+                          value={sttApiKey}
+                          onChange={(e) => handleSttApiKeyChange(e.target.value)}
+                          className="glow-input"
+                          style={{ padding: '8px 12px', fontSize: '12px' }}
+                          placeholder="Bearer token"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </section>

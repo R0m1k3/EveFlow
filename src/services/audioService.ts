@@ -55,9 +55,21 @@ export class AudioService {
   private recognition: any = null;
   private isListeningActive = false;
   private currentAudioElement: HTMLAudioElement | null = null;
-  private audioQueue: { text: string; voiceName?: string; rate: number; pitch: number; provider: 'system' | 'google-free' }[] = [];
+  private audioQueue: { text: string; voiceName?: string; rate: number; pitch: number; provider: 'system' | 'google-free' | 'openai-tts' }[] = [];
   private isPlayingQueue = false;
   private activeReject: ((err: any) => void) | null = null;
+
+  // ASR/STT & TTS Custom API settings
+  private sttProvider: 'browser' | 'qwen3-asr' = 'browser';
+  private sttApiUrl = 'http://127.0.0.1:8000/v1';
+  private sttApiKey = '';
+  private sttModel = 'qwen3-asr';
+  private mediaRecorder: MediaRecorder | null = null;
+  private audioChunks: Blob[] = [];
+
+  private ttsApiUrl = 'http://127.0.0.1:8000/v1';
+  private ttsApiKey = '';
+  private ttsModel = 'tts-1';
 
   public get isSpeakingActive(): boolean {
     return this.isPlayingQueue || this.audioQueue.length > 0;
@@ -92,6 +104,21 @@ export class AudioService {
   constructor() {
     this.ttsSynth = window.speechSynthesis;
     this.initSTT();
+  }
+
+  // Permet de mettre à jour dynamiquement la configuration de la reconnaissance vocale
+  public updateSTTConfig(provider: 'browser' | 'qwen3-asr', apiUrl: string, apiKey: string, model: string) {
+    this.sttProvider = provider;
+    this.sttApiUrl = apiUrl;
+    this.sttApiKey = apiKey;
+    this.sttModel = model;
+  }
+
+  // Permet de mettre à jour dynamiquement la configuration du lecteur de voix personnalisé
+  public updateTTSConfig(apiUrl: string, apiKey: string, model: string) {
+    this.ttsApiUrl = apiUrl;
+    this.ttsApiKey = apiKey;
+    this.ttsModel = model;
   }
 
   // Initialisation de la reconnaissance vocale locale et gratuite (Web Speech API)
@@ -339,6 +366,98 @@ export class AudioService {
     }
   }
 
+  // Synthese vocale personnalisee via API OpenAI /v1/audio/speech
+  private async speakCustomAPI(text: string, voiceName?: string, rate: number = 1.0): Promise<void> {
+    const cleanText = this._cleanForTTS(text);
+    if (!cleanText.trim()) return;
+
+    if (!this.ttsApiUrl) {
+      throw new Error("L'URL de l'API TTS n'est pas configurée.");
+    }
+
+    const base = this.ttsApiUrl.replace(/\/$/, '');
+    let endpoint: string;
+    if (base.endsWith('/speech')) {
+      endpoint = base;
+    } else if (base.endsWith('/v1')) {
+      endpoint = `${base}/audio/speech`;
+    } else {
+      endpoint = `${base}/v1/audio/speech`;
+    }
+
+    const body = {
+      model: this.ttsModel || 'tts-1',
+      input: cleanText,
+      voice: voiceName || 'alloy'
+    };
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
+    if (this.ttsApiKey) {
+      headers['Authorization'] = `Bearer ${this.ttsApiKey.trim()}`;
+    }
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+      const rawErr = await response.text().catch(() => '(no body)');
+      let errMsg = `Erreur TTS API: ${response.status}`;
+      try {
+        const parsed = JSON.parse(rawErr);
+        errMsg = parsed.error?.message || parsed.message || rawErr;
+      } catch {}
+      throw new Error(errMsg);
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+
+    await new Promise<void>((resolve, reject) => {
+      const audio = new Audio(url);
+      this.currentAudioElement = audio;
+      audio.playbackRate = rate;
+      this.activeReject = reject;
+
+      const timeout = setTimeout(() => {
+        if (this.currentAudioElement === audio) this.currentAudioElement = null;
+        this.activeReject = null;
+        audio.pause();
+        reject(new Error("playback_stopped"));
+      }, 60000); // 60 secondes max pour une portion
+
+      audio.onended = () => {
+        clearTimeout(timeout);
+        if (this.currentAudioElement === audio) this.currentAudioElement = null;
+        this.activeReject = null;
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+
+      audio.onerror = () => {
+        clearTimeout(timeout);
+        if (this.currentAudioElement === audio) this.currentAudioElement = null;
+        this.activeReject = null;
+        URL.revokeObjectURL(url);
+        const code = audio.error ? audio.error.code : 'UNKNOWN';
+        const msg = audio.error ? audio.error.message : 'No message';
+        reject(new Error(`Erreur de lecture audio API (code: ${code}, msg: ${msg})`));
+      };
+
+      audio.play().catch((err) => {
+        clearTimeout(timeout);
+        if (this.currentAudioElement === audio) this.currentAudioElement = null;
+        this.activeReject = null;
+        URL.revokeObjectURL(url);
+        reject(err);
+      });
+    });
+  }
+
   // File de traitement asynchrone des phrases de synthèse vocale (Zero Trust & Zero Dependency)
   private async processQueue(): Promise<void> {
     if (this.isPlayingQueue) return;
@@ -351,6 +470,8 @@ export class AudioService {
       try {
         if (item.provider === 'google-free') {
           await this.speakGoogleFree(item.text, item.rate);
+        } else if (item.provider === 'openai-tts') {
+          await this.speakCustomAPI(item.text, item.voiceName, item.rate);
         } else {
           await new Promise<void>((resolve, reject) => {
             if (!this.ttsSynth) { reject('TTS non supporté'); return; }
@@ -371,7 +492,7 @@ export class AudioService {
           break;
         }
         this.logWarn("AudioService", "Échec de la lecture de la phrase dans la file", err);
-        if (item.provider === 'google-free') {
+        if (item.provider === 'google-free' || item.provider === 'openai-tts') {
           // Repli automatique transparent sur la voix locale hors-ligne pour ce segment précis en cas de défaillance
           try {
             await new Promise<void>((resolve, reject) => {
@@ -406,7 +527,7 @@ export class AudioService {
     voiceName?: string, 
     rate: number = 1.0, 
     pitch: number = 1.1,
-    provider: 'system' | 'google-free' = 'google-free'
+    provider: 'system' | 'google-free' | 'openai-tts' = 'google-free'
   ): Promise<void> {
     this.stopSpeaking();
     this.queueSentence(text, voiceName, rate, pitch, provider);
@@ -423,7 +544,7 @@ export class AudioService {
     voiceName?: string, 
     rate: number = 1.0, 
     pitch: number = 1.1,
-    provider: 'system' | 'google-free' = 'google-free'
+    provider: 'system' | 'google-free' | 'openai-tts' = 'google-free'
   ): void {
     const clean = text.trim();
     if (!clean) return;
@@ -463,6 +584,126 @@ export class AudioService {
     }
   }
 
+  // Démarrer l'écoute vocale API via MediaRecorder
+  private async startListeningAPI(
+    onResult: (text: string) => void,
+    onStart: () => void,
+    onEnd: () => void,
+    onError: (err: string) => void,
+    lang: string
+  ) {
+    if (this.isListeningActive) {
+      this.stopListening();
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.audioChunks = [];
+
+      let options = {};
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        options = { mimeType: 'audio/webm;codecs=opus' };
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        options = { mimeType: 'audio/webm' };
+      }
+
+      this.mediaRecorder = new MediaRecorder(stream, options);
+      this.isListeningActive = true;
+
+      this.mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          this.audioChunks.push(event.data);
+        }
+      };
+
+      this.mediaRecorder.onstart = () => {
+        onStart();
+      };
+
+      this.mediaRecorder.onstop = async () => {
+        this.isListeningActive = false;
+        onEnd();
+
+        // Stopper toutes les pistes pour éteindre le voyant du microphone
+        stream.getTracks().forEach(track => track.stop());
+
+        if (this.audioChunks.length === 0) {
+          onError("Aucune donnée audio capturée");
+          return;
+        }
+
+        const audioBlob = new Blob(this.audioChunks, { type: this.mediaRecorder?.mimeType || 'audio/webm' });
+
+        try {
+          const text = await this.transcribeAudioWithAPI(audioBlob, lang);
+          onResult(text);
+        } catch (err: any) {
+          onError(err.message || "Erreur de transcription de l'API");
+        }
+      };
+
+      this.mediaRecorder.start();
+    } catch (err: any) {
+      this.isListeningActive = false;
+      onError(err.message || "Impossible d'accéder au microphone.");
+    }
+  }
+
+  // Requête API Speech-To-Text compatible OpenAI /v1/audio/transcriptions
+  private async transcribeAudioWithAPI(audioBlob: Blob, lang: string): Promise<string> {
+    if (!this.sttApiUrl) {
+      throw new Error("L'URL de l'API STT n'est pas configurée.");
+    }
+
+    const base = this.sttApiUrl.replace(/\/$/, '');
+    let endpoint: string;
+    if (base.endsWith('/transcriptions')) {
+      endpoint = base;
+    } else if (base.endsWith('/v1')) {
+      endpoint = `${base}/audio/transcriptions`;
+    } else {
+      endpoint = `${base}/v1/audio/transcriptions`;
+    }
+
+    const formData = new FormData();
+    const ext = audioBlob.type.includes('wav') ? 'wav' : 'webm';
+    formData.append('file', audioBlob, `audio.${ext}`);
+    formData.append('model', this.sttModel || 'qwen3-asr');
+
+    if (lang) {
+      const isoLang = lang.split('-')[0];
+      formData.append('language', isoLang);
+    }
+
+    const headers: Record<string, string> = {};
+    if (this.sttApiKey) {
+      headers['Authorization'] = `Bearer ${this.sttApiKey.trim()}`;
+    }
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: formData
+    });
+
+    if (!response.ok) {
+      const rawErr = await response.text().catch(() => '(no body)');
+      let errMsg = `Erreur STT API: ${response.status}`;
+      try {
+        const parsed = JSON.parse(rawErr);
+        errMsg = parsed.error?.message || parsed.message || rawErr;
+      } catch {}
+      throw new Error(errMsg);
+    }
+
+    const data = await response.json();
+    if (data && typeof data.text === 'string') {
+      return data.text;
+    }
+
+    throw new Error("Format de réponse de l'API STT invalide.");
+  }
+
   // Lancer l'écoute vocale (STT - Speech-To-Text)
   public startListening(
     onResult: (text: string) => void,
@@ -471,48 +712,59 @@ export class AudioService {
     onError: (err: string) => void,
     lang: string = 'fr-FR'
   ) {
-    if (!this.recognition) {
-      onError("STT non supporté");
-      return;
-    }
+    if (this.sttProvider === 'qwen3-asr') {
+      this.startListeningAPI(onResult, onStart, onEnd, onError, lang);
+    } else {
+      if (!this.recognition) {
+        onError("STT non supporté par ce navigateur");
+        return;
+      }
 
-    if (this.isListeningActive) {
-      this.recognition.stop();
-    }
+      if (this.isListeningActive) {
+        this.recognition.stop();
+      }
 
-    this.recognition.lang = lang;
-    this.isListeningActive = true;
+      this.recognition.lang = lang;
+      this.isListeningActive = true;
 
-    this.recognition.onstart = () => {
-      onStart();
-    };
+      this.recognition.onstart = () => {
+        onStart();
+      };
 
-    this.recognition.onresult = (event: any) => {
-      const resultText = event.results[0][0].transcript;
-      onResult(resultText);
-    };
+      this.recognition.onresult = (event: any) => {
+        const resultText = event.results[0][0].transcript;
+        onResult(resultText);
+      };
 
-    this.recognition.onerror = (event: any) => {
-      onError(event.error);
-    };
+      this.recognition.onerror = (event: any) => {
+        onError(event.error);
+      };
 
-    this.recognition.onend = () => {
-      this.isListeningActive = false;
-      onEnd();
-    };
+      this.recognition.onend = () => {
+        this.isListeningActive = false;
+        onEnd();
+      };
 
-    try {
-      this.recognition.start();
-    } catch (e: any) {
-      onError(e.message || "Erreur de démarrage de l'écoute");
+      try {
+        this.recognition.start();
+      } catch (e: any) {
+        onError(e.message || "Erreur de démarrage de l'écoute");
+      }
     }
   }
 
   // Arrêter l'écoute vocale
   public stopListening() {
-    if (this.recognition && this.isListeningActive) {
-      this.recognition.stop();
-      this.isListeningActive = false;
+    if (this.sttProvider === 'qwen3-asr') {
+      if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+        this.mediaRecorder.stop();
+        this.isListeningActive = false;
+      }
+    } else {
+      if (this.recognition && this.isListeningActive) {
+        this.recognition.stop();
+        this.isListeningActive = false;
+      }
     }
   }
 }
