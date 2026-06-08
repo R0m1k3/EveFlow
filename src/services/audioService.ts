@@ -63,7 +63,7 @@ export class AudioService {
   private sttProvider: 'browser' | 'qwen3-asr' = 'browser';
   private sttApiUrl = 'http://127.0.0.1:8000/v1';
   private sttApiKey = '';
-  private sttModel = 'qwen3-asr';
+  private sttModel = 'Qwen/Qwen3-ASR-0.6B';
   private mediaRecorder: MediaRecorder | null = null;
   private audioChunks: Blob[] = [];
 

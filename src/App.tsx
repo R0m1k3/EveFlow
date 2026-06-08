@@ -898,7 +898,7 @@ export const App: React.FC = () => {
   const [sttProvider, setSttProvider] = useState<'browser' | 'qwen3-asr'>('browser');
   const [sttApiUrl, setSttApiUrl] = useState<string>('http://127.0.0.1:8000/v1');
   const [sttApiKey, setSttApiKey] = useState<string>('');
-  const [sttModel, setSttModel] = useState<string>('qwen3-asr');
+  const [sttModel, setSttModel] = useState<string>('Qwen/Qwen3-ASR-0.6B');
 
   const [ttsApiUrl, setTtsApiUrl] = useState<string>('http://127.0.0.1:8000/v1');
   const [ttsApiKey, setTtsApiKey] = useState<string>('');
@@ -1187,7 +1187,14 @@ export const App: React.FC = () => {
       if (val) setSttApiKey(val);
     });
     persistRead('eveflow_stt_model').then(val => {
-      if (val) setSttModel(val);
+      if (val) {
+        if (val === 'qwen3-asr') {
+          setSttModel('Qwen/Qwen3-ASR-0.6B');
+          persistWrite('eveflow_stt_model', 'Qwen/Qwen3-ASR-0.6B');
+        } else {
+          setSttModel(val);
+        }
+      }
     });
     persistRead('eveflow_tts_api_url').then(val => {
       if (val) setTtsApiUrl(val);
