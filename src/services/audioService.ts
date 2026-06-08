@@ -64,8 +64,20 @@ export class AudioService {
   private sttApiUrl = 'http://127.0.0.1:8000/v1';
   private sttApiKey = '';
   private sttModel = 'Qwen/Qwen3-ASR-0.6B';
-  private mediaRecorder: MediaRecorder | null = null;
-  private audioChunks: Blob[] = [];
+
+  // Propriétés pour l'enregistrement WAV direct
+  private audioContext: AudioContext | null = null;
+  private scriptProcessor: ScriptProcessorNode | null = null;
+  private micStream: MediaStream | null = null;
+  private leftChannel: Float32Array[] = [];
+  private recordingLength = 0;
+  private sampleRate = 44100;
+
+  // Callbacks pour l'écoute
+  private activeOnResult: ((text: string) => void) | null = null;
+  private activeOnEnd: (() => void) | null = null;
+  private activeOnError: ((err: string) => void) | null = null;
+  private activeLang = 'fr-FR';
 
   private ttsApiUrl = 'http://127.0.0.1:8000/v1';
   private ttsApiKey = '';
@@ -584,7 +596,7 @@ export class AudioService {
     }
   }
 
-  // Démarrer l'écoute vocale API via MediaRecorder
+  // Démarrer l'écoute vocale API via AudioContext (WAV Recorder)
   private async startListeningAPI(
     onResult: (text: string) => void,
     onStart: () => void,
@@ -596,56 +608,153 @@ export class AudioService {
       this.stopListening();
     }
 
+    // Assigner les callbacks pour y avoir accès à l'arrêt
+    this.activeOnResult = onResult;
+    this.activeOnEnd = onEnd;
+    this.activeOnError = onError;
+    this.activeLang = lang;
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      this.audioChunks = [];
+      this.micStream = stream;
+      this.leftChannel = [];
+      this.recordingLength = 0;
 
-      let options = {};
-      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-        options = { mimeType: 'audio/webm;codecs=opus' };
-      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
-        options = { mimeType: 'audio/webm' };
-      }
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      this.audioContext = new AudioCtx();
+      this.sampleRate = this.audioContext.sampleRate;
 
-      this.mediaRecorder = new MediaRecorder(stream, options);
+      const source = this.audioContext.createMediaStreamSource(stream);
+      // bufferSize de 2048, 1 canal d'entrée, 1 de sortie
+      this.scriptProcessor = this.audioContext.createScriptProcessor(2048, 1, 1);
+
+      this.scriptProcessor.onaudioprocess = (e) => {
+        if (!this.isListeningActive) return;
+        const inputData = e.inputBuffer.getChannelData(0);
+        // Cloner les échantillons
+        this.leftChannel.push(new Float32Array(inputData));
+        this.recordingLength += inputData.length;
+      };
+
+      source.connect(this.scriptProcessor);
+      this.scriptProcessor.connect(this.audioContext.destination);
+
       this.isListeningActive = true;
-
-      this.mediaRecorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          this.audioChunks.push(event.data);
-        }
-      };
-
-      this.mediaRecorder.onstart = () => {
-        onStart();
-      };
-
-      this.mediaRecorder.onstop = async () => {
-        this.isListeningActive = false;
-        onEnd();
-
-        // Stopper toutes les pistes pour éteindre le voyant du microphone
-        stream.getTracks().forEach(track => track.stop());
-
-        if (this.audioChunks.length === 0) {
-          onError("Aucune donnée audio capturée");
-          return;
-        }
-
-        const audioBlob = new Blob(this.audioChunks, { type: this.mediaRecorder?.mimeType || 'audio/webm' });
-
-        try {
-          const text = await this.transcribeAudioWithAPI(audioBlob, lang);
-          onResult(text);
-        } catch (err: any) {
-          onError(err.message || "Erreur de transcription de l'API");
-        }
-      };
-
-      this.mediaRecorder.start();
+      onStart();
     } catch (err: any) {
       this.isListeningActive = false;
+      this.logError("STT", "Impossible d'accéder au microphone", err);
       onError(err.message || "Impossible d'accéder au microphone.");
+    }
+  }
+
+  // Arrêter proprement la capture AudioContext et exporter en WAV
+  private stopListeningAPI() {
+    if (!this.isListeningActive) return;
+    this.isListeningActive = false;
+
+    // Déconnecter le processeur
+    if (this.scriptProcessor) {
+      this.scriptProcessor.disconnect();
+      this.scriptProcessor.onaudioprocess = null;
+      this.scriptProcessor = null;
+    }
+
+    // Arrêter le flux micro
+    if (this.micStream) {
+      this.micStream.getTracks().forEach(track => track.stop());
+      this.micStream = null;
+    }
+
+    // Fermer l'audio context
+    if (this.audioContext) {
+      this.audioContext.close();
+      this.audioContext = null;
+    }
+
+    const onEndCallback = this.activeOnEnd;
+    const onResultCallback = this.activeOnResult;
+    const onErrorCallback = this.activeOnError;
+    const lang = this.activeLang;
+
+    if (onEndCallback) onEndCallback();
+
+    if (this.recordingLength === 0) {
+      if (onErrorCallback) onErrorCallback("Aucune donnée audio capturée");
+      return;
+    }
+
+    // Exporter le tampon audio en fichier WAV
+    const wavBlob = this.exportWAV(this.leftChannel, this.recordingLength, this.sampleRate);
+
+    this.transcribeAudioWithAPI(wavBlob, lang)
+      .then(text => {
+        if (onResultCallback) onResultCallback(text);
+      })
+      .catch(err => {
+        this.logError("STT", "Erreur de transcription", err);
+        if (onErrorCallback) onErrorCallback(err.message || "Erreur de transcription de l'API");
+      });
+  }
+
+  // Fonctions utilitaires pour générer le conteneur WAV PCM 16-bit
+  private exportWAV(channelData: Float32Array[], recordingLength: number, sampleRate: number): Blob {
+    const buffer = this.mergeBuffers(channelData, recordingLength);
+    const wavBuffer = new ArrayBuffer(44 + buffer.length * 2);
+    const view = new DataView(wavBuffer);
+
+    /* Identifiant RIFF */
+    this.writeString(view, 0, 'RIFF');
+    /* Taille du fichier */
+    view.setUint32(4, 36 + buffer.length * 2, true);
+    /* Type RIFF */
+    this.writeString(view, 8, 'WAVE');
+    /* Identifiant format fmt */
+    this.writeString(view, 12, 'fmt ');
+    /* Longueur du chunk format */
+    view.setUint32(16, 16, true);
+    /* Format d'encodage (1 = PCM non compressé) */
+    view.setUint16(20, 1, true);
+    /* Nombre de canaux (1 = Mono) */
+    view.setUint16(22, 1, true);
+    /* Fréquence d'échantillonnage */
+    view.setUint32(24, sampleRate, true);
+    /* Débit d'octets (sampleRate * blockAlign) */
+    view.setUint32(28, sampleRate * 2, true);
+    /* Block align (1 canal * 2 octets par échantillon) */
+    view.setUint16(32, 2, true);
+    /* Bits par échantillon (16 bits) */
+    view.setUint16(34, 16, true);
+    /* Identifiant de données data */
+    this.writeString(view, 36, 'data');
+    /* Longueur des données audio */
+    view.setUint32(40, buffer.length * 2, true);
+
+    this.floatTo16BitPCM(view, 44, buffer);
+
+    return new Blob([view], { type: 'audio/wav' });
+  }
+
+  private mergeBuffers(channelData: Float32Array[], recordingLength: number): Float32Array {
+    const result = new Float32Array(recordingLength);
+    let offset = 0;
+    for (let i = 0; i < channelData.length; i++) {
+      result.set(channelData[i], offset);
+      offset += channelData[i].length;
+    }
+    return result;
+  }
+
+  private writeString(view: DataView, offset: number, string: string) {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  }
+
+  private floatTo16BitPCM(output: DataView, offset: number, input: Float32Array) {
+    for (let i = 0; i < input.length; i++, offset += 2) {
+      const s = Math.max(-1, Math.min(1, input[i]));
+      output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
     }
   }
 
@@ -666,9 +775,8 @@ export class AudioService {
     }
 
     const formData = new FormData();
-    const ext = audioBlob.type.includes('wav') ? 'wav' : 'webm';
-    formData.append('file', audioBlob, `audio.${ext}`);
-    formData.append('model', this.sttModel || 'qwen3-asr');
+    formData.append('file', audioBlob, 'audio.wav');
+    formData.append('model', this.sttModel || 'Qwen/Qwen3-ASR-0.6B');
 
     if (lang) {
       const isoLang = lang.split('-')[0];
@@ -756,10 +864,7 @@ export class AudioService {
   // Arrêter l'écoute vocale
   public stopListening() {
     if (this.sttProvider === 'qwen3-asr') {
-      if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
-        this.mediaRecorder.stop();
-        this.isListeningActive = false;
-      }
+      this.stopListeningAPI();
     } else {
       if (this.recognition && this.isListeningActive) {
         this.recognition.stop();
