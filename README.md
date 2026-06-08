@@ -1,7 +1,7 @@
 # 🚀 EveFlow — Compagnon de Bureau Rétro-Futuriste 3D
 
 [![Windows Version](https://img.shields.io/badge/OS-Windows-blue.svg?style=flat-square&logo=windows)](https://github.com/R0m1k3/EveFlow)
-[![Version](https://img.shields.io/badge/version-1.0.3-brightgreen.svg?style=flat-square)](https://github.com/R0m1k3/EveFlow/releases/tag/v1.0.3)
+[![Version](https://img.shields.io/badge/version-1.0.4-brightgreen.svg?style=flat-square)](https://github.com/R0m1k3/EveFlow/releases/tag/v1.0.4)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey.svg?style=flat-square)](LICENSE)
 
 **EveFlow** est un compagnon de bureau Windows immersif haut de gamme, combinant une esthétique cyberpunk rétro-futuriste soignée et des technologies d'intelligence artificielle avancées. Il intègre un assistant virtuel en 3D nommé **Eve**, animé en temps réel avec des expressions émotionnelles dynamiques et synchronisé avec des services de synthèse vocale (TTS/STT) locaux et des architectures multi-agents.
@@ -74,7 +74,7 @@ Pour générer l'exécutable d'installation Windows (`.exe`) autonome :
    ```bash
    npm run dist
    ```
-   *L'exécutable d'installation NSIS (`EveFlow Setup 1.0.3.exe`) et la build décompressée seront générés dans le dossier `./out/`.*
+   *L'exécutable d'installation NSIS (`EveFlow Setup 1.0.4.exe`) et la build décompressée seront générés dans le dossier `./out/`.*
 
 ---
 

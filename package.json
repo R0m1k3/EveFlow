@@ -1,6 +1,6 @@
 {
   "name": "eveflow",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Retro-futuristic Windows companion with 3D Eve bot, local TTS/STT, and multi-agent connectivity",
   "main": "main.js",
   "scripts": {
