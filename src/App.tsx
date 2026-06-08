@@ -1606,12 +1606,18 @@ export const App: React.FC = () => {
   const handleStartVocalRecord = () => {
     if (!audioServiceRef.current) return;
 
+    setErrorMessage(null);
     audioServiceRef.current.stopSpeaking();
     setIsSpeaking(false);
 
     audioServiceRef.current.startListening(
       (text) => {
-        handleSendMessage(text);
+        if (text.trim()) {
+          handleSendMessage(text);
+        } else {
+          setErrorMessage("Aucune parole n'a été détectée. Veuillez parler distinctement près du micro.");
+          setCurrentEmotion('sad');
+        }
       },
       () => {
         setIsListening(true);
@@ -1622,6 +1628,8 @@ export const App: React.FC = () => {
       },
       (err) => {
         setIsListening(false);
+        setErrorMessage(`Erreur de reconnaissance vocale : ${err}`);
+        setCurrentEmotion('sad');
         console.error(err);
       },
       sttLang

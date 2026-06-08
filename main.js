@@ -267,6 +267,14 @@ app.whenReady().then(() => {
     }
   );
 
+  // Autoriser l'accès aux périphériques de capture (microphone) sous Electron
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    if (permission === 'media') {
+      return callback(true);
+    }
+    callback(false);
+  });
+
   startWebhookServer();
   createWindow();
 
