@@ -35,6 +35,8 @@ export function CoreStage({ compact }: Props) {
   const transcript = useVoice((s) => s.lastTranscript);
   const interim = useVoice((s) => s.interim);
   const voiceError = useVoice((s) => s.error);
+  const wake = useVoice((s) => s.wake);
+  const wakeKeywords = useVoice((s) => s.wakeKeywords);
   const assistantName = useSettings((s) => s.settings.assistantName);
   const reduceMotion = useSettings((s) => s.settings.ui.reduceMotion);
   const transport = useHermes((s) => s.transport);
@@ -57,6 +59,7 @@ export function CoreStage({ compact }: Props) {
   else if (hud === 'error') sub = previewText(error ?? voiceError ?? 'erreur', 90);
   else if (hud === 'speaking') sub = 'synthèse vocale';
   else if (transcript) sub = `« ${previewText(transcript, 80)} »`;
+  else if (wake === 'spotting') sub = `dites « ${wakeKeywords[0] ?? 'jarvis'} »${link === 'online' ? ` · ${transport}` : link === 'offline' ? ' · Hermes hors ligne' : ''}`;
   else sub = link === 'online' ? `liaison Hermes · ${transport}` : link === 'offline' ? 'Hermes hors ligne' : '';
 
   return (

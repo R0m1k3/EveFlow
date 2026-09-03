@@ -1,6 +1,7 @@
 import type { VoiceModelSpec, VoiceSpeaker } from '../../shared/voice';
 
 const ASR = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models';
+const KWS = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models';
 const TTS = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models';
 
 const KOKORO_SPEAKERS: VoiceSpeaker[] = [
@@ -66,6 +67,24 @@ export const VOICE_CATALOG: VoiceModelSpec[] = [
     url: `${ASR}/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2`,
     dir: 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17',
     files: ['model.int8.onnx', 'tokens.txt']
+  },
+  {
+    id: 'kws-en',
+    kind: 'kws',
+    engine: 'kws-transducer',
+    name: 'Détecteur de mot-clé (zipformer, 3 Mo)',
+    description: 'Écoute permanente du mot d’activation, quasi gratuite en CPU. Mot-clé libre (« jarvis », « hey jarvis »…).',
+    languages: ['en', 'fr'],
+    sizeMb: 4,
+    url: `${KWS}/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2`,
+    dir: 'sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01',
+    files: [
+      'encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx',
+      'decoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx',
+      'joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx',
+      'tokens.txt'
+    ],
+    recommended: true
   },
   {
     id: 'kokoro-v1',

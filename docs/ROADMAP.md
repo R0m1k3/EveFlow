@@ -9,7 +9,8 @@
 | HUD arc-reactor réactif au son | Fait | Canvas 2D optimisé (pas d'ombres, couleurs en cache, 30 fps en veille, arrêt fenêtre masquée) |
 | Reconnaissance vocale locale | Fait | Whisper base/small/turbo via sherpa-onnx dans un processus utilitaire |
 | Synthèse vocale locale | Fait | Kokoro v1.0 (voix française Siwis) et Piper fr |
-| Mot d'activation | Fait, mode « après transcription » | Filtre « Jarvis … » en mains libres, tolérant aux erreurs de transcription |
+| Mot d'activation permanent | Fait (2.2.0) | Keyword spotting sherpa-onnx en continu ; mot-clé libre encodé en BPE ; validé sur audio réel (détection, zéro faux positif sur le test anglais) |
+| Mot d'activation après transcription | Fait | Filtre « Jarvis … » en mains libres, tolérant aux erreurs de transcription |
 | Détection de fin de phrase | Fait | VAD énergétique adaptatif, pré-roll 400 ms |
 | Hermes : runs, sessions, chat completions | Fait | Transport choisi selon `/v1/capabilities` |
 | Approbations, steer, stop | Fait | Modales, injection de consigne en cours de run |
@@ -21,7 +22,7 @@
 
 Sources : [jarvis-desktop-ai](https://github.com/ccarloshenri/jarvis-desktop-ai), [JarvisAi](https://github.com/PanPenek/JarvisAi), [bertrandmbanwi/Jarvis](https://github.com/bertrandmbanwi/Jarvis), [InterGenJLU/jarvis](https://github.com/InterGenJLU/jarvis), [livekit-wakeword](https://livekit.com/blog/livekit-wakeword), [sherpa-onnx keyword spotting](https://k2-fsa.github.io/sherpa/onnx/kws/index.html), [Hermes Agent features](https://hermes-agent.nousresearch.com/docs/user-guide/features/overview).
 
-1. **Mot d'activation permanent, quasi gratuit en CPU.** Les projets de référence utilisent openWakeWord (« hey jarvis ») ou un modèle de keyword spotting qui écoute en continu, au lieu de transcrire chaque phrase. sherpa-onnx fournit un modèle KWS anglais de 3,3 Mo qui accepte n'importe quel mot-clé sans réentraînement ; « JARVIS » s'encode `▁JA R VI S` avec son modèle BPE (vérifié). C'est le prochain chantier prioritaire : streaming du micro vers le worker, détection en continu, puis capture de la commande.
+1. **Mot d'activation permanent, quasi gratuit en CPU.** Les projets de référence utilisent openWakeWord (« hey jarvis ») ou un modèle de keyword spotting qui écoute en continu, au lieu de transcrire chaque phrase. sherpa-onnx fournit un modèle KWS anglais de 3,3 Mo qui accepte n'importe quel mot-clé sans réentraînement ; « JARVIS » s'encode `▁JA R VI S` avec son modèle BPE (vérifié). Livré en 2.2.0 (voir l'étape 1 ci-dessous).
 2. **VAD neuronal (Silero) au lieu du seuil d'énergie.** Fin de phrase plus nette (environ 500 ms gagnés) et beaucoup moins de faux départs sur le bruit ambiant. Silero est déjà livré dans sherpa-onnx (`silero_vad.onnx`, 0,6 Mo).
 3. **Latence perçue sous la seconde.** Les références visent 1 s entre la fin de parole et le premier mot prononcé : STT rapide, premier token en streaming, TTS phrase par phrase (déjà en place), et un modèle Hermes rapide pour la conversation courante.
 4. **Vision d'écran.** Capture d'écran à la demande (« Jarvis, qu'est-ce que je regarde ? ») envoyée à Hermes comme image, ou lecture d'une fenêtre. Hermes accepte déjà les images inline.
@@ -31,11 +32,11 @@ Sources : [jarvis-desktop-ai](https://github.com/ccarloshenri/jarvis-desktop-ai)
 
 ## Plan proposé
 
-### Étape 1 (courte) : écoute permanente
-- Streamer l'audio du micro (16 kHz, blocs de 128 ms) du renderer vers le worker via IPC.
-- Dans le worker : `KeywordSpotter` sherpa-onnx (modèle gigaspeech 3,3 Mo, mot-clé configurable encodé automatiquement avec `bpe.model` via un petit encodeur BPE côté Node ou un dictionnaire pré-encodé pour « jarvis », « eve », « hey jarvis », « ok jarvis »).
-- À la détection : chime, capture de la commande avec Silero VAD, transcription, envoi.
-- Consommation attendue : quelques pourcents d'un cœur, pas de transcription en continu.
+### Étape 1 : écoute permanente — livrée en 2.2.0
+- Le renderer garde un seul flux micro (AudioWorklet 16 kHz) et envoie des blocs de 256 ms au processus principal, qui alimente le `KeywordSpotter` sherpa-onnx dans le worker.
+- Mots-clés encodés en BPE (table SentencePiece pour les mots courants, repli glouton sur le vocabulaire du modèle), sensibilité réglable (seuil 0,45 → 0,12).
+- À la détection : chime, capture de la commande sur le même flux (VAD énergétique, pré-roll 400 ms), transcription locale ou API, envoi à Hermes ; retour automatique à l'écoute.
+- Reste à faire : remplacer le VAD énergétique par Silero pour la fin de phrase.
 
 ### Étape 2 : vision et actions locales
 - Outil `capture_screen` (Electron `desktopCapturer`) qui joint une capture à la requête Hermes.

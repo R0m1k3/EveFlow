@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { TtsState } from '../services/voice/tts';
 
 export type ListenPhase = 'off' | 'arming' | 'listening' | 'speech' | 'transcribing';
+export type WakeState = 'off' | 'starting' | 'spotting' | 'error';
 
 interface VoiceStore {
   phase: ListenPhase;
@@ -12,6 +13,9 @@ interface VoiceStore {
   interim: string;
   error: string | null;
   micDevices: Array<{ deviceId: string; label: string }>;
+  wake: WakeState;
+  wakeKeywords: string[];
+  setWake: (state: WakeState, keywords?: string[]) => void;
   setPhase: (phase: ListenPhase) => void;
   setInputLevel: (level: number) => void;
   setTts: (state: TtsState) => void;
@@ -31,6 +35,9 @@ export const useVoice = create<VoiceStore>((set) => ({
   interim: '',
   error: null,
   micDevices: [],
+  wake: 'off',
+  wakeKeywords: [],
+  setWake: (wake, wakeKeywords) => set(wakeKeywords ? { wake, wakeKeywords } : { wake }),
   setPhase: (phase) => set({ phase }),
   setInputLevel: (inputLevel) => set({ inputLevel }),
   setTts: (tts) => set({ tts }),

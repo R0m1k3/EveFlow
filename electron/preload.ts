@@ -14,7 +14,7 @@ import {
   type WindowMode
 } from '../shared/ipc';
 import type { EveFlowBridge, Unsubscribe } from '../shared/bridge';
-import { VOICE_IPC, type SynthesizeRequest, type SynthesizeResult, type TranscribeRequest, type TranscribeResult, type VoiceDownloadProgress, type VoiceEngineStatus, type VoiceModelStatus } from '../shared/voice';
+import { VOICE_IPC, type KwsDetection, type KwsStartRequest, type SynthesizeRequest, type SynthesizeResult, type TranscribeRequest, type TranscribeResult, type VoiceDownloadProgress, type VoiceEngineStatus, type VoiceModelStatus } from '../shared/voice';
 
 function subscribe<T>(channel: string, callback: (payload: T) => void): Unsubscribe {
   const listener = (_event: Electron.IpcRendererEvent, payload: T) => callback(payload);
@@ -69,7 +69,11 @@ const api: EveFlowBridge = {
     onProgress: (cb: (progress: VoiceDownloadProgress) => void) => subscribe<VoiceDownloadProgress>(VOICE_IPC.modelsProgress, cb),
     transcribe: (req: TranscribeRequest) => ipcRenderer.invoke(VOICE_IPC.transcribe, req) as Promise<TranscribeResult>,
     synthesize: (req: SynthesizeRequest) => ipcRenderer.invoke(VOICE_IPC.synthesize, req) as Promise<SynthesizeResult>,
-    unload: (id?: string) => ipcRenderer.invoke(VOICE_IPC.unload, id) as Promise<unknown>
+    unload: (id?: string) => ipcRenderer.invoke(VOICE_IPC.unload, id) as Promise<unknown>,
+    kwsStart: (req: KwsStartRequest) => ipcRenderer.invoke(VOICE_IPC.kwsStart, req) as Promise<{ accepted: string[]; rejected: string[] }>,
+    kwsStop: () => ipcRenderer.invoke(VOICE_IPC.kwsStop) as Promise<void>,
+    kwsAudio: (pcm: Uint8Array, sampleRate: number) => ipcRenderer.send(VOICE_IPC.kwsAudio, pcm, sampleRate),
+    onKwsDetected: (cb: (detection: KwsDetection) => void) => subscribe<KwsDetection>(VOICE_IPC.kwsDetected, cb)
   }
 };
 

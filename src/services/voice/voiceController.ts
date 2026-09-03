@@ -10,7 +10,9 @@ import { audioBus } from './audioBus';
 import { listMicrophones, MicCapture } from './capture';
 import { speech } from './speech';
 import { BrowserRecognizer, transcribeWav } from './stt';
+import { WakeListener } from './wakeListener';
 import type { WavResult } from './wav';
+import { bridge } from '../../lib/bridge';
 
 const SENSITIVITY_RATIO: Record<number, number> = { 1: 4.5, 2: 3.4, 3: 2.6, 4: 2.0, 5: 1.6 };
 const SENSITIVITY_MIN_RMS: Record<number, number> = { 1: 0.03, 2: 0.02, 3: 0.012, 4: 0.008, 5: 0.005 };
@@ -46,6 +48,8 @@ export function matchWakeWord(text: string, wakeWord: string): { matched: boolea
 
 class VoiceController {
   private capture = new MicCapture();
+  private wake = new WakeListener();
+  private unsubscribeKws: (() => void) | null = null;
   /** After a bare wake word, the next utterance is accepted without the wake word. */
   private attentionUntil = 0;
   private browser = new BrowserRecognizer();
@@ -74,15 +78,102 @@ class VoiceController {
   dispose(): void {
     this.unsubscribeVoice?.();
     this.stop();
+    void this.stopWakeMode();
   }
 
   get isListening(): boolean {
     return useVoice.getState().phase !== 'off';
   }
 
+  get wakeActive(): boolean {
+    return this.wake.isActive;
+  }
+
   toggle(): void {
+    if (this.wake.isActive) {
+      // Always-on mode: the button starts/cancels a command capture on the shared microphone.
+      if (this.wake.currentPhase === 'command' || this.wake.currentPhase === 'speech') this.wake.cancelCommand();
+      else this.onWakeDetected('manuel');
+      return;
+    }
     if (this.isListening) this.stop();
     else void this.start();
+  }
+
+  /** Always-on keyword spotting: the microphone stays open and the main process spots the wake word. */
+  async startWakeMode(): Promise<void> {
+    const api = bridge();
+    const voice = useVoice.getState();
+    if (!api || this.wake.isActive) return;
+    const settings = useSettings.getState().settings.voice;
+    voice.setWake('starting');
+    try {
+      const phrases = [settings.wakeWord || 'jarvis', `hey ${settings.wakeWord || 'jarvis'}`];
+      const result = await api.voice.kwsStart({ modelId: 'kws-en', keywords: phrases, sensitivity: settings.kwsSensitivity });
+      this.unsubscribeKws?.();
+      this.unsubscribeKws = api.voice.onKwsDetected((d) => this.onWakeDetected(d.keyword));
+      const sensitivity = Math.min(5, Math.max(1, Math.round(settings.sensitivity))) as 1 | 2 | 3 | 4 | 5;
+      await this.wake.start({
+        deviceId: settings.micDeviceId || undefined,
+        vad: { silenceMs: settings.silenceMs, speechRatio: SENSITIVITY_RATIO[sensitivity], minRms: SENSITIVITY_MIN_RMS[sensitivity] },
+        callbacks: {
+          onPhase: (phase) => {
+            const v = useVoice.getState();
+            if (phase === 'spotting') {
+              v.setPhase('off');
+              const chat = useChat.getState();
+              if (chat.hud === 'listening') chat.setHud(chat.isSending ? 'thinking' : 'idle');
+            } else if (phase === 'command') {
+              v.setPhase('listening');
+              useChat.getState().setHud('listening');
+            } else if (phase === 'speech') {
+              v.setPhase('speech');
+              useChat.getState().ping();
+            }
+          },
+          onLevel: (level) => {
+            const q = Math.round(level * 20) / 20;
+            if (q !== useVoice.getState().inputLevel) useVoice.getState().setInputLevel(q);
+          },
+          onUtterance: (wav) => void this.transcribe(wav, true),
+          onNoSpeech: () => useVoice.getState().setInputLevel(0),
+          onError: (message) => useVoice.getState().setError(message)
+        }
+      });
+      voice.setWake('spotting', result.accepted.map((k) => k.replace(/_/g, ' ')));
+      Log.info('voice', `wake mode on: ${result.accepted.join(', ')}${result.rejected.length ? ` (rejetés : ${result.rejected.join(', ')})` : ''}`);
+    } catch (err) {
+      const message = (err as Error).message;
+      voice.setWake('error');
+      voice.setError(message);
+      useChat.getState().setError(`Mot d’activation : ${message}`);
+      Log.error('voice', `wake mode failed: ${message}`);
+      await api.voice.kwsStop().catch(() => undefined);
+    }
+  }
+
+  async stopWakeMode(): Promise<void> {
+    this.unsubscribeKws?.();
+    this.unsubscribeKws = null;
+    this.wake.stop();
+    useVoice.getState().setWake('off');
+    await bridge()?.voice.kwsStop().catch(() => undefined);
+  }
+
+  /** Restart spotting with the current settings (wake word, sensitivity, microphone). */
+  async restartWakeMode(): Promise<void> {
+    await this.stopWakeMode();
+    if (useSettings.getState().settings.voice.wakeMode === 'kws') await this.startWakeMode();
+  }
+
+  private onWakeDetected(keyword: string): void {
+    if (!this.wake.isActive || this.wake.currentPhase !== 'spotting') return;
+    if (useChat.getState().isSending) return;
+    Log.info('voice', `wake: ${keyword}`);
+    speech.stop();
+    useChat.getState().ping();
+    this.playChime(true);
+    this.wake.beginCommand();
   }
 
   setHandsFree(on: boolean): void {
@@ -113,6 +204,11 @@ class VoiceController {
   async start(auto = false): Promise<void> {
     const voice = useVoice.getState();
     if (voice.phase !== 'off') return;
+    if (this.wake.isActive) {
+      // The always-on listener owns the microphone: open a command capture on it instead.
+      if (!auto) this.onWakeDetected('manuel');
+      return;
+    }
     const settings = useSettings.getState().settings.voice;
     const seq = ++this.startSeq;
     voice.setError(null);
@@ -218,7 +314,7 @@ class VoiceController {
     }
   }
 
-  private async transcribe(wav: WavResult): Promise<void> {
+  private async transcribe(wav: WavResult, fromWake = false): Promise<void> {
     const voice = useVoice.getState();
     voice.setPhase('transcribing');
     useChat.getState().setHud('thinking');
@@ -229,7 +325,8 @@ class VoiceController {
       voice.setTranscript(text);
       voice.setPhase('off');
       Log.info('voice', `transcript (${wav.durationSec.toFixed(1)}s): ${text}`);
-      if (voice.handsFree && settings.wakeWordEnabled && Date.now() > this.attentionUntil) {
+      const filterByTranscript = settings.wakeMode === 'transcript' || (settings.wakeMode === 'off' && settings.wakeWordEnabled);
+      if (!fromWake && voice.handsFree && filterByTranscript && Date.now() > this.attentionUntil) {
         const { matched, rest } = matchWakeWord(text, settings.wakeWord || 'jarvis');
         if (!matched) {
           Log.debug('voice', 'utterance ignored: no wake word');

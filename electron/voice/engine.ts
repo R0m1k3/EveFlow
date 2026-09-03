@@ -2,12 +2,20 @@
  * Host side of the voice worker: spawns the utility process on demand, correlates
  * requests and responses, restarts the worker if it crashes.
  */
-import { utilityProcess, type UtilityProcess } from 'electron';
+import { utilityProcess, type UtilityProcess, type WebContents } from 'electron';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
-import type { SynthesizeRequest, SynthesizeResult, TranscribeRequest, TranscribeResult, VoiceEngineStatus } from '../../shared/voice';
+import { VOICE_IPC, type KwsDetection, type KwsStartRequest, type SynthesizeRequest, type SynthesizeResult, type TranscribeRequest, type TranscribeResult, type VoiceEngineStatus } from '../../shared/voice';
+import { buildKeywordsFile, parseTokens } from '../../shared/keywords';
 import { findModel } from './catalog';
 import { isInstalled, modelDir, modelsDir } from './models';
 import { log } from '../logger';
+
+/** Renderer that receives keyword detections while spotting is active. */
+let kwsSubscriber: WebContents | null = null;
+let kwsActive = false;
+let kwsRequest: KwsStartRequest | null = null;
 
 interface Pending {
   resolve: (value: unknown) => void;
@@ -34,7 +42,15 @@ function spawn(): UtilityProcess {
   child = proc;
   proc.stdout?.on('data', (d: Buffer) => log('DEBUG', 'voice-worker', d.toString().trim()));
   proc.stderr?.on('data', (d: Buffer) => log('WARN', 'voice-worker', d.toString().trim()));
-  proc.on('message', (msg: { id: number; ok: boolean; result?: unknown; error?: string }) => {
+  proc.on('message', (msg: { id?: number; type?: string; ok?: boolean; result?: unknown; error?: string; keyword?: string; at?: number }) => {
+    if (msg.type === 'kws.detected') {
+      if (kwsSubscriber && !kwsSubscriber.isDestroyed()) {
+        kwsSubscriber.send(VOICE_IPC.kwsDetected, { keyword: msg.keyword ?? '', at: msg.at ?? Date.now() } satisfies KwsDetection);
+      }
+      log('INFO', 'voice', `wake word detected: ${msg.keyword}`);
+      return;
+    }
+    if (typeof msg.id !== 'number') return;
     const p = pending.get(msg.id);
     if (!p) return;
     pending.delete(msg.id);
@@ -48,6 +64,8 @@ function spawn(): UtilityProcess {
     if (child !== proc) return;
     child = null;
     rejectAll('Le moteur vocal local s’est arrêté de façon inattendue.');
+    // Keyword spotting survives a worker restart: re-arm on the next audio frame.
+    if (kwsActive) kwsArmed = false;
   });
   log('INFO', 'voice', 'voice worker started');
   return proc;
@@ -106,6 +124,60 @@ export async function synthesize(req: SynthesizeRequest): Promise<SynthesizeResu
   );
   const buffer = Buffer.from(result.wav, 'base64');
   return { ...result, wav: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength) };
+}
+
+let kwsArmed = false;
+const SENSITIVITY_THRESHOLD: Record<number, number> = { 1: 0.45, 2: 0.35, 3: 0.25, 4: 0.18, 5: 0.12 };
+const SENSITIVITY_SCORE: Record<number, number> = { 1: 1.0, 2: 1.0, 3: 1.2, 4: 1.5, 5: 2.0 };
+
+/** Start keyword spotting; the keywords file is derived from the phrases and the model vocabulary. */
+export async function kwsStart(req: KwsStartRequest, sender: WebContents): Promise<{ accepted: string[]; rejected: string[] }> {
+  const spec = findModel(req.modelId);
+  if (!spec || spec.kind !== 'kws') throw new Error('Modèle de détection introuvable');
+  if (!isInstalled(spec)) throw new Error('Détecteur de mot-clé non installé (Paramètres → Modèles locaux).');
+  const dir = modelDir(spec);
+  const vocab = parseTokens(fs.readFileSync(path.join(dir, 'tokens.txt'), 'utf8'));
+  const phrases = req.keywords.map((k) => String(k).slice(0, 40)).filter(Boolean).slice(0, 8);
+  const file = buildKeywordsFile(phrases, vocab);
+  if (file.accepted.length === 0) throw new Error(`Aucun mot d’activation encodable : ${file.rejected.join(', ')}`);
+  const hash = createHash('sha1').update(file.content).digest('hex').slice(0, 10);
+  const keywordsFile = path.join(modelsDir(), `keywords-${hash}.txt`);
+  fs.writeFileSync(keywordsFile, file.content, 'utf8');
+  const sensitivity = Math.min(5, Math.max(1, Math.round(req.sensitivity))) as 1 | 2 | 3 | 4 | 5;
+  kwsSubscriber = sender;
+  kwsRequest = req;
+  await request({ type: 'kws.start', model: { id: spec.id, engine: spec.engine, dir, files: spec.files }, keywordsFile, threshold: SENSITIVITY_THRESHOLD[sensitivity], score: SENSITIVITY_SCORE[sensitivity] }, 60_000);
+  kwsActive = true;
+  kwsArmed = true;
+  log('INFO', 'voice', `keyword spotting on: ${file.accepted.join(', ')} (threshold ${SENSITIVITY_THRESHOLD[sensitivity]})`);
+  return { accepted: file.accepted, rejected: file.rejected };
+}
+
+export async function kwsStop(): Promise<void> {
+  kwsActive = false;
+  kwsArmed = false;
+  kwsSubscriber = null;
+  if (child) await request({ type: 'kws.stop' }, 10_000).catch(() => undefined);
+}
+
+/** Feed 16-bit PCM from the renderer (fire-and-forget). */
+export function kwsFeed(pcm: Uint8Array, sampleRate: number): void {
+  if (!kwsActive) return;
+  const proc = spawn();
+  if (!kwsArmed) {
+    // Worker restarted: re-create the spotter before feeding audio.
+    if (kwsRequest && kwsSubscriber) {
+      kwsArmed = true;
+      kwsStart(kwsRequest, kwsSubscriber).catch((err) => log('WARN', 'voice', `kws re-arm failed: ${(err as Error).message}`));
+    }
+    return;
+  }
+  const b64 = Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString('base64');
+  try {
+    proc.postMessage({ id: -1, type: 'kws.audio', pcm: b64, sampleRate });
+  } catch (err) {
+    log('WARN', 'voice', `kws feed failed: ${(err as Error).message}`);
+  }
 }
 
 /** Native model memory is only released deterministically by restarting the worker. */

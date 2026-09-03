@@ -44,6 +44,18 @@ function useBoot(): boolean {
       if (api) {
         disposers.push(useVoiceModels.getState().subscribe());
         void useVoiceModels.getState().refresh();
+        if (settings.voice.wakeMode === 'kws') void voiceController.startWakeMode();
+        let lastWake = JSON.stringify([settings.voice.wakeMode, settings.voice.wakeWord, settings.voice.kwsSensitivity, settings.voice.micDeviceId]);
+        disposers.push(
+          useSettings.subscribe((s) => {
+            const v = s.settings.voice;
+            const key = JSON.stringify([v.wakeMode, v.wakeWord, v.kwsSensitivity, v.micDeviceId]);
+            if (key === lastWake) return;
+            lastWake = key;
+            if (v.wakeMode === 'kws') void voiceController.restartWakeMode();
+            else void voiceController.stopWakeMode();
+          })
+        );
         disposers.push(api.hermes.onPush(handlePush));
         disposers.push(
           api.hotkeys.on((event) => {

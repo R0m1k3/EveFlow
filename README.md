@@ -1,7 +1,7 @@
 # EveFlow 2 — Interface vocale JARVIS pour Hermes Agent
 
 [![Build](https://img.shields.io/github/actions/workflow/status/R0m1k3/EveFlow/windows-release.yml?style=flat-square)](https://github.com/R0m1k3/EveFlow/actions)
-[![Version](https://img.shields.io/badge/version-2.1.0-brightgreen.svg?style=flat-square)](https://github.com/R0m1k3/EveFlow/releases)
+[![Version](https://img.shields.io/badge/version-2.2.0-brightgreen.svg?style=flat-square)](https://github.com/R0m1k3/EveFlow/releases)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey.svg?style=flat-square)](LICENSE)
 
 **EveFlow** est un compagnon de bureau Windows qui transforme [Hermes Agent](https://hermes-agent.nousresearch.com/) en assistant vocal à la JARVIS : un noyau holographique réactif au son, une conversation en streaming, les outils, sous-agents, approbations, crons, skills et sessions d'Hermes pilotés depuis un seul HUD.
@@ -23,7 +23,7 @@ La version 2 est une réécriture complète : plus de robot 3D, un pipeline voca
 * **Détection d'activité vocale** (seuil adaptatif, sensibilité et silence de fin réglables) : l'enregistrement s'arrête tout seul quand vous avez fini de parler.
 * **Mains libres** : le micro se réactive après chaque réponse.
 * **Modèles intégrés, hors ligne** (sherpa-onnx dans un processus séparé) : reconnaissance Whisper (base, small, large-v3 turbo) ou SenseVoice, synthèse Kokoro v1.0 (voix française Siwis et voix anglaises) ou Piper (Siwis, Tom, UPMC). Les modèles se téléchargent depuis **Paramètres → Modèles locaux** et tournent sur le processeur.
-* **Mot d'activation** en mains libres : seules les phrases commençant par « Jarvis » (configurable) partent vers Hermes, le reste est ignoré ; un « Jarvis » seul ouvre une fenêtre d'écoute.
+* **Écoute permanente** : un détecteur de mot-clé de 3 Mo (sherpa-onnx, keyword spotting) tourne en continu sur le micro, quasi gratuit en CPU. « Jarvis » (ou n'importe quel mot-clé) ouvre l'écoute, « Jarvis, allume… » envoie directement la commande, et le mot coupe la voix en cours. Alternative : filtre du mot après transcription en mains libres.
 * **STT externe** : n'importe quelle API `/v1/audio/transcriptions` compatible OpenAI (Qwen3-ASR, Whisper, Speaches, faster-whisper-server, LocalAI, OpenAI). Repli sur la reconnaissance Chromium.
 * **TTS externe** : API `/v1/audio/speech` compatible OpenAI, voix système Windows ou Google Translate. Lecture phrase par phrase pendant le streaming, préchargement du segment suivant, coupure instantanée.
 * Raccourcis globaux : `Ctrl+Shift+Espace` (micro), `Ctrl+Shift+J` (afficher/masquer), `Ctrl+Shift+Échap` (couper la voix).

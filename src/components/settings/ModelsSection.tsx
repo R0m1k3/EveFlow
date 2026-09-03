@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Download, Trash2, X, CheckCircle2, Cpu, Mic, Volume2, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Download, Trash2, X, CheckCircle2, Cpu, Mic, Volume2, AlertTriangle, RefreshCw, Ear } from 'lucide-react';
 import type { VoiceModelStatus } from '../../../shared/voice';
 import { bridge } from '../../lib/bridge';
 import { useShallow } from 'zustand/react/shallow';
@@ -19,20 +19,23 @@ function ModelRow({ model }: { model: VoiceModelStatus }) {
   const isActive = model.kind === 'stt' ? activeStt === model.id : activeTts === model.id;
   const busy = !!progress && (progress.phase === 'download' || progress.phase === 'extract');
 
+  const wakeMode = useSettings((s) => s.settings.voice.wakeMode);
   const activate = () => {
     if (model.kind === 'stt') update({ voice: { localModel: model.id, provider: 'local' } });
+    else if (model.kind === 'kws') update({ voice: { wakeMode: 'kws' } });
     else update({ speech: { localModel: model.id, provider: 'local', localSpeaker: model.speakers?.[0]?.id ?? 0 } });
   };
+  const activeNow = model.kind === 'kws' ? wakeMode === 'kws' : isActive;
 
   return (
-    <div className="row-item" style={isActive && model.installed ? { borderColor: 'var(--accent)' } : undefined}>
+    <div className="row-item" style={activeNow && model.installed ? { borderColor: 'var(--accent)' } : undefined}>
       <div className="main">
         <div className="row wrap" style={{ gap: 6 }}>
           <span className="name">{model.name}</span>
           {model.recommended && <span className="status-pill ok">recommandé</span>}
           {model.installed && <span className="status-pill online">installé · {formatMb(model.installedBytes)}</span>}
           {!model.installed && !busy && <span className="status-pill">{model.sizeMb} Mo</span>}
-          {isActive && model.installed && <span className="status-pill active">actif</span>}
+          {activeNow && model.installed && <span className="status-pill active">actif</span>}
         </div>
         <span className="desc">{model.description}</span>
         <span className="meta">langues : {model.languages.join(', ')}{model.speakers ? ` · ${model.speakers.length} voix` : ''}</span>
@@ -49,7 +52,7 @@ function ModelRow({ model }: { model: VoiceModelStatus }) {
           <button className="icon-btn danger" title="Annuler" onClick={() => void cancel(model.id)}><X size={13} /></button>
         ) : model.installed ? (
           <>
-            {!isActive && <button className="btn small" onClick={activate}>Utiliser</button>}
+            {!activeNow && <button className="btn small" onClick={activate}>Utiliser</button>}
             <button className="icon-btn danger" title="Supprimer du disque" onClick={() => { if (confirm(`Supprimer « ${model.name} » ?`)) void remove(model.id); }}><Trash2 size={13} /></button>
           </>
         ) : (
@@ -72,6 +75,7 @@ export function ModelsSection() {
 
   const stt = models.filter((m) => m.kind === 'stt');
   const tts = models.filter((m) => m.kind === 'tts');
+  const kws = models.filter((m) => m.kind === 'kws');
   return (
     <>
       <div className="card">
@@ -90,6 +94,10 @@ export function ModelsSection() {
         <div className="row" style={{ marginTop: 8 }}>
           <button className="btn small ghost" onClick={() => { void refresh(); void checkEngine(); }}><RefreshCw size={13} /> Actualiser</button>
         </div>
+      </div>
+      <div className="card">
+        <div className="section-title"><Ear size={12} /> Mot d’activation</div>
+        <div className="list">{kws.map((m) => <ModelRow key={m.id} model={m} />)}</div>
       </div>
       <div className="card">
         <div className="section-title"><Mic size={12} /> Reconnaissance vocale</div>
