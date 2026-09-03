@@ -60,11 +60,15 @@ export function SettingsDrawer({ onClose }: Props) {
       let caps = '';
       try {
         const c = await client.capabilities();
-        caps = ` · ${String(c.model ?? '')} · ${Object.entries(c.features ?? {}).filter(([, v]) => v === true).length} fonctions`;
-      } catch {
-        caps = ' · capabilities indisponibles';
+        caps = ` · modèle ${String(c.model ?? '?')} · ${Object.entries(c.features ?? {}).filter(([, v]) => v === true).length} fonctions`;
+      } catch (err) {
+        const message = (err as Error).message;
+        caps = /404/.test(message)
+          ? ' · /v1/capabilities absent (Hermes ancien : transport chat completions)'
+          : ` · capabilities : ${message}`;
       }
-      setHermesTest({ status: 'ok', message: `${health.status}${caps}` });
+      const via = bridge() ? 'via Electron' : 'via navigateur';
+      setHermesTest({ status: 'ok', message: `${health.status} (${via})${caps}` });
       void hermesStore.connect();
     } catch (err) {
       setHermesTest({ status: 'fail', message: (err as Error).message });

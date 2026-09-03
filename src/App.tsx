@@ -36,6 +36,10 @@ function useBoot(): boolean {
       void useHermes.getState().refreshWebhook();
 
       const api = bridge();
+      if (!api && /Electron/i.test(navigator.userAgent)) {
+        useChat.getState().setError("Pont Electron indisponible : le script preload n'a pas été chargé. Réinstallez EveFlow ou consultez eveflow.log.");
+        Log.error('app', 'window.eveflow missing inside Electron');
+      }
       if (api) {
         disposers.push(api.hermes.onPush(handlePush));
         disposers.push(
