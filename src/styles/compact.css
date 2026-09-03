@@ -67,3 +67,54 @@
   font-size: 13px;
   padding: 8px 11px;
 }
+
+/* Glanceable strip: state, unread badge, last sentence. */
+.compact-glance {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.compact-glance .state {
+  color: var(--accent);
+}
+.compact-glance .state.alert {
+  color: var(--danger);
+}
+.compact-glance .last {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.compact-glance .badges {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.compact-glance .unread {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #03101c;
+  font-weight: 700;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.compact-glance .mission {
+  color: var(--warn, #f5c451);
+}

@@ -242,6 +242,8 @@ class VoiceController {
     }
 
     const sensitivity = Math.min(5, Math.max(1, Math.round(settings.sensitivity))) as 1 | 2 | 3 | 4 | 5;
+    // Barge-in: while the assistant talks, demand a clearly louder signal so the speaker echo cannot trigger.
+    const barging = auto && settings.bargeIn && speech.isSpeaking();
     try {
       await audioBus.resume();
       await this.capture.start({
@@ -249,8 +251,8 @@ class VoiceController {
         mode: settings.captureMode,
         vad: {
           silenceMs: settings.silenceMs,
-          speechRatio: SENSITIVITY_RATIO[sensitivity],
-          minRms: SENSITIVITY_MIN_RMS[sensitivity],
+          speechRatio: barging ? Math.min(0.9, SENSITIVITY_RATIO[sensitivity] + 0.15) : SENSITIVITY_RATIO[sensitivity],
+          minRms: barging ? SENSITIVITY_MIN_RMS[sensitivity] * 2.5 : SENSITIVITY_MIN_RMS[sensitivity],
           noSpeechTimeoutMs: useVoice.getState().handsFree ? Number.POSITIVE_INFINITY : 9_000
         },
         callbacks: {
@@ -259,6 +261,8 @@ class VoiceController {
             if (q !== useVoice.getState().inputLevel) useVoice.getState().setInputLevel(q);
           },
           onSpeechStart: () => {
+            // The user started talking over the assistant: cut the voice (barge-in).
+            if (speech.isSpeaking()) speech.stop();
             useVoice.getState().setPhase('speech');
             useChat.getState().ping();
           },

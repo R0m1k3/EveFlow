@@ -39,6 +39,20 @@ export interface WebhookSettings {
   secret: string;
 }
 
+export interface NotificationSettings {
+  /** Quiet hours: no spoken pushes, no chime, dimmed HUD (24 h "HH:MM"). */
+  quietEnabled: boolean;
+  quietStart: string;
+  quietEnd: string;
+  /** Pushes whose text or job name contains one of these words are spoken even during quiet hours. */
+  priorityKeywords: string;
+  /** Speak only the first sentences of incoming pushes (cron reports can be long). */
+  summarizeIncoming: boolean;
+  summarySentences: number;
+  /** Dim the HUD (night theme) during quiet hours. */
+  nightTheme: boolean;
+}
+
 export interface Settings {
   version: 2;
   assistantName: string;
@@ -49,6 +63,7 @@ export interface Settings {
   voice: VoiceSettings;
   speech: SpeechSettings;
   webhook: WebhookSettings;
+  notifications: NotificationSettings;
   ui: {
     showTelemetry: boolean;
     showReasoning: boolean;
@@ -73,7 +88,8 @@ export const DEFAULT_SETTINGS: Settings = {
     reasoningEffort: '',
     instructions:
       "Tu es l'interface vocale EveFlow (style JARVIS). Réponds en français, de façon concise et orale quand la question est simple; utilise le Markdown uniquement pour le contenu structuré (code, listes, tableaux). Les images doivent être des URL http(s) ou des fichiers du dossier partagé.",
-    localTools: true
+    localTools: true,
+    missionModel: ''
   },
   voice: {
     provider: 'openai-compatible',
@@ -113,6 +129,7 @@ export const DEFAULT_SETTINGS: Settings = {
     speakIncoming: true
   },
   webhook: { enabled: true, port: 7842, secret: '' },
+  notifications: { quietEnabled: false, quietStart: '22:30', quietEnd: '07:30', priorityKeywords: 'urgent, alerte, alarme, panne', summarizeIncoming: true, summarySentences: 2, nightTheme: true },
   ui: { showTelemetry: true, showReasoning: false, reduceMotion: false, compactOpacity: 0.92 },
   hermesSessionId: ''
 };

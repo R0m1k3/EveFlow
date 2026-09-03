@@ -1,7 +1,7 @@
 # EveFlow 2 — Interface vocale JARVIS pour Hermes Agent
 
 [![Build](https://img.shields.io/github/actions/workflow/status/R0m1k3/EveFlow/windows-release.yml?style=flat-square)](https://github.com/R0m1k3/EveFlow/actions)
-[![Version](https://img.shields.io/badge/version-2.3.0-brightgreen.svg?style=flat-square)](https://github.com/R0m1k3/EveFlow/releases)
+[![Version](https://img.shields.io/badge/version-2.4.0-brightgreen.svg?style=flat-square)](https://github.com/R0m1k3/EveFlow/releases)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey.svg?style=flat-square)](LICENSE)
 
 **EveFlow** est un compagnon de bureau Windows qui transforme [Hermes Agent](https://hermes-agent.nousresearch.com/) en assistant vocal à la JARVIS : un noyau holographique réactif au son, une conversation en streaming, les outils, sous-agents, approbations, crons, skills et sessions d'Hermes pilotés depuis un seul HUD.
@@ -26,6 +26,11 @@ La version 2 est une réécriture complète : plus de robot 3D, un pipeline voca
 * **Fin de phrase neuronale** : en écoute permanente, Silero VAD (0,6 Mo, sherpa-onnx) décide du début et de la fin de la commande à la place du seuil d'énergie ; moins de faux départs sur le bruit, coupure plus nette. Repli automatique sur le VAD énergétique si le modèle n'est pas installé.
 * **Vision d'écran** : « Jarvis, regarde mon écran » (ou le bouton de la barre de commande) joint une capture de l'écran principal à la question envoyée à Hermes.
 * **Actions locales instantanées** : « verrouille la session », « monte le son », « coupe le son », « piste suivante », « ouvre Spotify », « ouvre github.com »… exécutées sur le PC sans passer par Hermes, résultat lu à voix haute. Liste blanche d'actions dans le processus principal, désactivable dans les paramètres.
+* **Serveur MCP intégré** : Hermes se connecte à `http://<pc>:7842/mcp` et obtient les outils du PC (capture d'écran renvoyée en image, verrouillage, applications, URL, touches média, presse-papiers, recherche de fichiers, voix, notifications, état du HUD, affichage dans le fil). Même port et même secret que le webhook ; en mode chat completions, les mêmes outils sont proposés directement au modèle.
+* **Heures calmes et priorités** : plage horaire pendant laquelle les messages poussés s'affichent sans être lus ni faire clignoter le noyau (badge « non lus » à la place), thème nuit automatique, mots prioritaires lus quand même, résumé vocal des rapports longs (les premières phrases seulement).
+* **Mode mission** : un bouton dans la barre de commande bascule sur un second modèle Hermes (plus puissant) pour les tâches longues ; le modèle rapide reste utilisé pour la conversation courante.
+* **Widget compact « glanceable »** : état (veille, écoute, réflexion, parle), dernière phrase de l'assistant, badge de non-lus, indicateurs heures calmes et mission.
+* **Barge-in** : en mains libres, parler par-dessus l'assistant coupe sa voix ; le seuil est relevé pendant qu'il parle pour ignorer l'écho du haut-parleur.
 * **Écoute permanente** : un détecteur de mot-clé de 3 Mo (sherpa-onnx, keyword spotting) tourne en continu sur le micro, quasi gratuit en CPU. « Jarvis » (ou n'importe quel mot-clé) ouvre l'écoute, « Jarvis, allume… » envoie directement la commande, et le mot coupe la voix en cours. Alternative : filtre du mot après transcription en mains libres.
 * **STT externe** : n'importe quelle API `/v1/audio/transcriptions` compatible OpenAI (Qwen3-ASR, Whisper, Speaches, faster-whisper-server, LocalAI, OpenAI). Repli sur la reconnaissance Chromium.
 * **TTS externe** : API `/v1/audio/speech` compatible OpenAI, voix système Windows ou Google Translate. Lecture phrase par phrase pendant le streaming, préchargement du segment suivant, coupure instantanée.
@@ -91,6 +96,20 @@ Pour recevoir les résultats de crons ou le miroir d'autres canaux dans EveFlow,
 ```
 
 ---
+
+### Donner à Hermes les outils du PC (MCP)
+
+Dans `~/.hermes/config.yaml` côté Hermes :
+
+```yaml
+mcp_servers:
+  eveflow:
+    url: "http://<ip-du-pc>:7842/mcp"
+    headers:
+      Authorization: "Bearer <secret du webhook EveFlow>"
+```
+
+Sans secret, EveFlow n'écoute qu'en local (`127.0.0.1`) ; définissez un secret dans Paramètres → Webhook pour un Hermes distant. Outils exposés : `capture_screen`, `lock_session`, `open_app`, `open_url`, `media_key`, `clipboard_get`, `clipboard_set`, `find_files`, `speak_text`, `notify_user`, `set_hud_state`, `get_app_status`, `get_conversation_history`, `show_message`.
 
 ## Développement
 

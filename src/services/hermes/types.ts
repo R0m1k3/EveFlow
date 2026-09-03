@@ -10,6 +10,8 @@ export interface HermesConfig {
   reasoningEffort: '' | 'low' | 'medium' | 'high';
   /** Extra instructions layered on top of the Hermes system prompt. */
   instructions: string;
+  /** Model used in "mission" mode (long tasks); empty = same as `model`. */
+  missionModel: string;
   /** Expose EveFlow client tools in chat-completions mode. */
   localTools: boolean;
 }

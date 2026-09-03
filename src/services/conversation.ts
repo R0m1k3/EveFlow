@@ -9,7 +9,8 @@ import { previewText } from '../lib/text';
 import { useChat, type PendingRequest } from '../state/chat';
 import { useHermes } from '../state/hermes';
 import { useSettings } from '../state/settings';
-import { executeLocalTool, LOCAL_TOOL_DEFINITIONS } from './hermes/localTools';
+import { executeLocalTool, LOCAL_TOOL_DEFINITIONS, type LocalToolContext } from './hermes/localTools';
+import { isPriority, summarize } from '../lib/quietHours';
 import type { HermesStreamEvent, SendHandle } from './hermes/types';
 import { speech } from './voice/speech';
 import { bridge } from '../lib/bridge';
@@ -48,7 +49,7 @@ export function pingCore(): void {
   useChat.getState().ping();
 }
 
-function localToolContext() {
+export function localToolContext(): LocalToolContext {
   const chat = useChat.getState();
   const settings = useSettings.getState().settings;
   return {
@@ -60,13 +61,20 @@ function localToolContext() {
       setTimeout(() => useChat.getState().setHudOverride(null), 6000);
     },
     speak: (text: string) => speech.say(text),
+    showMessage: (text: string, title?: string) => {
+      if (!text.trim()) return;
+      useChat.getState().addMessage({ role: 'assistant', content: text, source: 'hermes', jobName: title, status: 'done' });
+    },
     getStatus: () => ({
       transport: useHermes.getState().transport,
       link: useHermes.getState().link,
       assistant: settings.assistantName,
       messages: chat.messages.length,
       speaking: speech.isSpeaking(),
-      handsFree: settings.voice.handsFree
+      handsFree: settings.voice.handsFree,
+      quietHours: chat.quiet,
+      missionMode: chat.missionMode,
+      wakeMode: settings.voice.wakeMode
     }),
     getHistory: (n: number) => chat.messages.slice(-n).map((m) => ({ role: m.role, content: m.content })),
     notify: (title: string, body: string) => {
@@ -231,7 +239,9 @@ export async function sendMessage(text: string, images: string[] = [], source = 
   const timing = { firstToken: null as number | null, startedAt };
   const runIdRef = { id: null as string | null };
 
-  const client = hermes.client();
+  const mission = chat.missionMode && settings.hermes.missionModel.trim();
+  const client = hermes.client(mission ? settings.hermes.missionModel : undefined);
+  if (mission) Log.info('hermes', `mission mode → model ${settings.hermes.missionModel}`);
   const handle = client.send(
     {
       text: trimmed || 'Analyse cette image.',
@@ -363,11 +373,17 @@ export function handlePush(event: HermesPushEvent): void {
     chat.pushActivity({ kind: 'job', name: event.jobName || 'cron', status: event.status?.includes('fail') ? 'error' : 'done', detail: previewText(event.text, 160) });
     void useHermes.getState().refreshJobs();
   }
-  if (event.role !== 'user' && settings.speech.speakIncoming) {
-    speech.say(event.jobName ? `Résultat de ${event.jobName}. ${event.text}` : event.text);
+  const n = settings.notifications;
+  const priority = isPriority(event.text, n.priorityKeywords, event.jobName) || !!event.status?.includes('fail');
+  const silenced = chat.quiet && !priority;
+  if (document.hidden || silenced) chat.incUnread();
+  if (event.role !== 'user' && settings.speech.speakIncoming && !silenced) {
+    const body = n.summarizeIncoming ? summarize(event.text, n.summarySentences) : event.text;
+    speech.say(event.jobName ? `Résultat de ${event.jobName}. ${body}` : body);
   }
+  if (silenced) Log.info('webhook', 'quiet hours: push shown silently');
   chat.setHud(event.status?.includes('fail') ? 'alert' : 'success');
-  pingCore();
+  if (!silenced) pingCore();
   setTimeout(() => {
     const s = useChat.getState();
     if (s.hud === 'success' || s.hud === 'alert') s.setHud(speech.isSpeaking() ? 'speaking' : 'idle');

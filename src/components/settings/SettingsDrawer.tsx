@@ -13,7 +13,7 @@ import { useVoice } from '../../state/voice';
 import { installedModels, useVoiceModels } from '../../state/voiceModels';
 import { ModelsSection } from './ModelsSection';
 
-type Section = 'general' | 'hermes' | 'voice' | 'speech' | 'models' | 'webhook' | 'ui';
+type Section = 'general' | 'hermes' | 'voice' | 'speech' | 'models' | 'webhook' | 'notifications' | 'ui';
 
 interface Props {
   onClose: () => void;
@@ -151,6 +151,7 @@ export function SettingsDrawer({ onClose }: Props) {
     ['speech', 'Voix / TTS'],
     ['models', 'Modèles locaux'],
     ['webhook', 'Webhook'],
+    ['notifications', 'Notifications'],
     ['general', 'Général'],
     ['ui', 'Interface']
   ];
@@ -215,6 +216,11 @@ export function SettingsDrawer({ onClose }: Props) {
                 </div>
               </div>
               <div className="field">
+              <label>Modèle « mission » (tâches longues)</label>
+              <input className="input" list="hermes-models" value={settings.hermes.missionModel} placeholder="(même modèle)" onChange={(e) => update({ hermes: { missionModel: e.target.value } })} />
+              <span className="hint">Utilisé quand le mode Mission est activé dans la barre de commande. Laissez vide pour garder le modèle principal.</span>
+            </div>
+            <div className="field">
                 <label>Instructions EveFlow (superposées au prompt Hermes)</label>
                 <textarea className="textarea" value={settings.hermes.instructions} onChange={(e) => update({ hermes: { instructions: e.target.value } })} />
               </div>
@@ -471,10 +477,47 @@ export function SettingsDrawer({ onClose }: Props) {
   -d '{"role":"assistant","text":"Rapport terminé","source":"telegram"}'`}</pre>
               <span className="hint">Formats acceptés : {'{role,text}'}, {'{event:"run.completed",input,output}'}, {'{event:"job.completed",job:{name},output,status}'}, {'{type:"message",payload:{text}}'}.</span>
             </div>
+            <div className="field">
+              <label>Serveur MCP pour Hermes (outils du PC : écran, applications, volume, presse-papiers, voix)</label>
+              <pre className="input" style={{ whiteSpace: 'pre-wrap', fontSize: 11.5, userSelect: 'text' }}>{`# ~/.hermes/config.yaml côté Hermes
+mcp_servers:
+  eveflow:
+    url: "http://<ip-de-ce-pc>:${settings.webhook.port}/mcp"${settings.webhook.secret ? '\n    headers:\n      Authorization: "Bearer <secret>"' : ''}`}</pre>
+              <span className="hint">Même port et même secret que le webhook. Sans secret, EveFlow n’écoute qu’en local (127.0.0.1) : définissez un secret pour un Hermes distant.</span>
+            </div>
             <div className="row">
               <button className="btn primary small" onClick={() => void applyWebhook()} disabled={!bridge()}>Appliquer et redémarrer</button>
               {hermesWebhook && <span className={`status-pill ${hermesWebhook.listening ? 'online' : 'offline'}`}>{hermesWebhook.listening ? `port ${hermesWebhook.port}` : hermesWebhook.error ?? 'inactif'}</span>}
             </div>
+          </div>
+        )}
+
+        {section === 'notifications' && (
+          <div className="card">
+            <Toggle on={settings.notifications.quietEnabled} onChange={(v) => update({ notifications: { quietEnabled: v } })} label="Heures calmes" hint="Les messages poussés (crons, Telegram) s’affichent sans être lus à voix haute ni faire clignoter le noyau ; le HUD passe en mode nuit." />
+            <div className="grid-2">
+              <div className="field">
+                <label>Début</label>
+                <input className="input" type="time" value={settings.notifications.quietStart} onChange={(e) => update({ notifications: { quietStart: e.target.value } })} />
+              </div>
+              <div className="field">
+                <label>Fin</label>
+                <input className="input" type="time" value={settings.notifications.quietEnd} onChange={(e) => update({ notifications: { quietEnd: e.target.value } })} />
+              </div>
+            </div>
+            <Toggle on={settings.notifications.nightTheme} onChange={(v) => update({ notifications: { nightTheme: v } })} label="Thème nuit pendant les heures calmes" />
+            <div className="field" style={{ marginTop: 10 }}>
+              <label>Mots prioritaires (lus même en heures calmes)</label>
+              <input className="input" value={settings.notifications.priorityKeywords} onChange={(e) => update({ notifications: { priorityKeywords: e.target.value } })} placeholder="urgent, alerte, panne" />
+              <span className="hint">Séparés par des virgules ; comparés au texte et au nom du cron. Les échecs de crons sont toujours prioritaires.</span>
+            </div>
+            <Toggle on={settings.notifications.summarizeIncoming} onChange={(v) => update({ notifications: { summarizeIncoming: v } })} label="Résumé vocal des messages entrants" hint="Seules les premières phrases sont lues ; le message complet reste dans le fil." />
+            {settings.notifications.summarizeIncoming && (
+              <div className="field">
+                <label>Phrases lues : {settings.notifications.summarySentences}</label>
+                <input className="range" type="range" min={1} max={5} step={1} value={settings.notifications.summarySentences} onChange={(e) => update({ notifications: { summarySentences: Number(e.target.value) } })} />
+              </div>
+            )}
           </div>
         )}
 

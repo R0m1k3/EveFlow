@@ -57,6 +57,16 @@ interface ChatStore {
   pingCount: number;
   /** Time to first token of the current reply, in ms. */
   latencyMs: number | null;
+  /** Pushes received while the window was hidden / compact, cleared when the user looks. */
+  unread: number;
+  /** Mission mode routes the next messages to the "mission" model (long tasks). */
+  missionMode: boolean;
+  /** True while quiet hours apply (computed by App). */
+  quiet: boolean;
+  incUnread: () => void;
+  markRead: () => void;
+  setMissionMode: (on: boolean) => void;
+  setQuiet: (quiet: boolean) => void;
 
   addMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<Pick<ChatMessage, 'id' | 'timestamp'>>) => string;
   updateMessage: (id: string, patch: Partial<ChatMessage> | ((m: ChatMessage) => Partial<ChatMessage>)) => void;
@@ -91,6 +101,13 @@ export const useChat = create<ChatStore>((set, get) => ({
   draft: '',
   pingCount: 0,
   latencyMs: null,
+  unread: 0,
+  missionMode: false,
+  quiet: false,
+  incUnread: () => set((s) => ({ unread: Math.min(99, s.unread + 1) })),
+  markRead: () => set((s) => (s.unread ? { unread: 0 } : {})),
+  setMissionMode: (missionMode) => set({ missionMode }),
+  setQuiet: (quiet) => set((s) => (s.quiet === quiet ? {} : { quiet })),
 
   addMessage: (message) => {
     const id = message.id ?? uid('msg');

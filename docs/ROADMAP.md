@@ -13,6 +13,11 @@
 | Mot d'activation après transcription | Fait | Filtre « Jarvis … » en mains libres, tolérant aux erreurs de transcription |
 | Détection de fin de phrase | Fait (2.3.0) | Silero VAD neuronal dans le worker (segment renvoyé au renderer), repli sur le VAD énergétique si le modèle manque |
 | Vision d'écran | Fait (2.3.0) | Capture `desktopCapturer` jointe à la requête Hermes (bouton, ou « regarde mon écran ») |
+| Serveur MCP local (outils du PC pour Hermes) | Fait (2.4.0) | `/mcp` sur le serveur webhook, JSON-RPC Streamable HTTP, 14 outils dont la capture d'écran renvoyée en image |
+| Heures calmes, priorités, résumé vocal | Fait (2.4.0) | Paramètres → Notifications ; thème nuit automatique ; badge non-lus |
+| Mode mission (second modèle) | Fait (2.4.0) | Bouton dans la barre de commande ; modèle dédié aux tâches longues |
+| Widget compact glanceable | Fait (2.4.0) | État, dernière phrase, non-lus, indicateurs |
+| Barge-in | Fait (2.4.0) | Coupe la voix dès que l'utilisateur parle ; seuil relevé pendant la synthèse (à valider avec l'annulation d'écho Windows) |
 | Actions système locales | Fait (2.3.0) | Verrouillage, volume et touches média, ouvrir une application ou une URL, presse-papiers, recherche de fichiers ; intentions courtes exécutées sans passer par Hermes |
 | Hermes : runs, sessions, chat completions | Fait | Transport choisi selon `/v1/capabilities` |
 | Approbations, steer, stop | Fait | Modales, injection de consigne en cours de run |
@@ -44,17 +49,21 @@ Sources : [jarvis-desktop-ai](https://github.com/ccarloshenri/jarvis-desktop-ai)
 - Capture d'écran (`desktopCapturer`, JPEG 1600 px) jointe à la requête Hermes : bouton dans la barre de commande, ou phrase « regarde mon écran… » à l'oral comme à l'écrit.
 - Actions locales (processus principal, liste blanche) : verrouiller, volume/mute/lecture/piste, ouvrir une application connue ou une URL http(s), presse-papiers, recherche de fichiers dans Documents/Bureau/Téléchargements/Images.
 - Routeur d'intentions FR/EN (`src/services/localCommands.ts`) exécuté avant l'envoi à Hermes ; désactivable dans Paramètres → Micro. Les phrases composées (« ouvre X puis… ») partent à Hermes.
-- Reste à faire : exposer ces actions à Hermes lui-même (serveur MCP local) pour qu'un run puisse les enchaîner.
+- Exposition à Hermes via le serveur MCP local livrée en 2.4.0.
 
-### Étape 3 : conversation plus naturelle
-- Barge-in réel : couper la voix dès que l'utilisateur parle (déjà préparé, à valider avec l'annulation d'écho Windows).
-- Réponses courtes à l'oral, détails à l'écran : instruction Hermes dédiée déjà en place, à affiner avec des consignes de format (« deux phrases à l'oral, détails en Markdown »).
-- Modèle rapide pour le bavardage, modèle puissant pour les missions (choix par transport ou par mot-clé).
+### Étape 3 : conversation plus naturelle — livrée en 2.4.0
+- Barge-in : l'utilisateur qui parle par-dessus coupe la voix ; seuil d'énergie relevé pendant la synthèse pour ignorer l'écho (à valider sur Windows avec l'annulation d'écho du micro).
+- Mode mission : second modèle Hermes choisi d'un clic pour les tâches longues.
+- Serveur MCP local : Hermes enchaîne lui-même les actions du PC dans ses runs.
 
-### Étape 4 : présence
-- Widget compact « glanceable » : dernière phrase, état, badge d'alertes.
-- Heures calmes, priorité des notifications, résumé vocal des crons.
-- Thèmes et voix par contexte (nuit, travail).
+### Étape 4 : présence — livrée en 2.4.0
+- Widget compact glanceable : état, dernière phrase, non-lus, indicateurs heures calmes / mission.
+- Heures calmes, mots prioritaires, résumé vocal des messages entrants, thème nuit.
+
+### Pistes suivantes
+- Voix différente par contexte (nuit, travail) et profils de réponse.
+- Mémoire locale des préférences transmise à Hermes (`X-Hermes-Session-Key` déjà en place).
+- Validation du barge-in et des touches média sur Windows réel (retours utilisateurs).
 
 ## Résultats du test de bout en bout (Linux, Xvfb, 4 cœurs lents)
 
@@ -68,5 +77,6 @@ Sources : [jarvis-desktop-ai](https://github.com/ccarloshenri/jarvis-desktop-ai)
 | Silero VAD sur phrase Kokoro de 2,3 s (2.3.0) | un seul segment, début et fin détectés, 6,7 s d'audio traités en 190 ms |
 | Capture d'écran → Hermes (2.3.0) | JPEG de 107 ko reçu côté Hermes (mock chat completions) |
 | Intention locale « coupe le son » (2.3.0) | traitée sans Hermes, résultat affiché dans le fil |
+| Serveur MCP (2.4.0) | initialize, tools/list (14 outils), tools/call côté principal (presse-papiers, capture image) et côté renderer (état, message dans le fil) |
 
 Sur un PC à 28 cœurs les temps sont nettement plus courts. Whisper small est maintenant recommandé pour le français.

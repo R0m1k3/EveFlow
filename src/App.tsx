@@ -3,7 +3,9 @@ import { AlertTriangle, X } from 'lucide-react';
 import type { WindowMode } from '../shared/ipc';
 import { bridge } from './lib/bridge';
 import { Log } from './lib/log';
-import { handlePush, stopGeneration } from './services/conversation';
+import { handlePush, localToolContext, stopGeneration } from './services/conversation';
+import { initMcpBridge } from './services/mcpBridge';
+import { isQuietTime } from './lib/quietHours';
 import { speech } from './services/voice/speech';
 import { voiceController } from './services/voice/voiceController';
 import { useChat } from './state/chat';
@@ -57,6 +59,7 @@ function useBoot(): boolean {
           })
         );
         disposers.push(api.hermes.onPush(handlePush));
+        initMcpBridge(localToolContext);
         disposers.push(
           api.hotkeys.on((event) => {
             if (event === 'ptt-toggle') voiceController.toggle();
@@ -95,6 +98,24 @@ function useBoot(): boolean {
 function useThemeSync(): void {
   const theme = useSettings((s) => s.settings.theme);
   const reduce = useSettings((s) => s.settings.ui.reduceMotion);
+  // Quiet hours: computed every 30 s; dims the HUD (night theme) and silences pushes.
+  const notif = useSettings((s) => s.settings.notifications);
+  useEffect(() => {
+    const tick = () => {
+      const quiet = notif.quietEnabled && isQuietTime(notif.quietStart, notif.quietEnd);
+      useChat.getState().setQuiet(quiet);
+      document.documentElement.toggleAttribute('data-night', quiet && notif.nightTheme);
+    };
+    tick();
+    const timer = setInterval(tick, 30_000);
+    return () => clearInterval(timer);
+  }, [notif]);
+  useEffect(() => {
+    const onVisible = () => { if (!document.hidden) useChat.getState().markRead(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.motion = reduce ? 'reduce' : 'full';

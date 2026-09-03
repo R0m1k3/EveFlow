@@ -159,3 +159,15 @@ textarea {
 .kv dd {
   user-select: text;
 }
+
+/* Quiet hours: dimmer HUD, softer glow. */
+:root[data-night] {
+  --accent-glow: rgba(var(--accent-rgb), 0.18);
+}
+:root[data-night] .hud-root,
+:root[data-night] .compact-root {
+  filter: brightness(0.72) saturate(0.85);
+}
+:root[data-night] .core-stage canvas {
+  opacity: 0.8;
+}

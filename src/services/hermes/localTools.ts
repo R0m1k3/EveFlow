@@ -3,16 +3,35 @@
  * With the runs/sessions transports Hermes uses its own server-side toolsets instead.
  */
 import { bridge } from '../../lib/bridge';
+import type { SystemAction } from '../../../shared/bridge';
 
 export interface LocalToolContext {
   setEmotion: (emotion: string) => void;
+  showMessage?: (text: string, title?: string) => void;
   speak: (text: string) => void;
   getStatus: () => Record<string, unknown>;
   getHistory: (n: number) => Array<{ role: string; content: string }>;
   notify: (title: string, body: string) => void;
 }
 
+const fn = (name: string, description: string, properties: Record<string, unknown> = {}, required: string[] = []) => ({
+  type: 'function',
+  function: { name, description, parameters: { type: 'object', properties, required } }
+});
+
+/** Tools executed on the user's PC through the Electron main process (allow-listed). */
+export const SYSTEM_TOOL_DEFINITIONS = [
+  fn('lock_session', "Verrouille la session de l'utilisateur."),
+  fn('open_app', "Lance une application du PC de l'utilisateur (bloc-notes, calculatrice, chrome, spotify, vscode, terminal, explorateur…).", { name: { type: 'string' } }, ['name']),
+  fn('open_url', "Ouvre une URL http(s) dans le navigateur de l'utilisateur.", { url: { type: 'string' } }, ['url']),
+  fn('media_key', 'Touche média : volume-up, volume-down, mute, play-pause, next, previous.', { key: { type: 'string', enum: ['volume-up', 'volume-down', 'mute', 'play-pause', 'next', 'previous'] } }, ['key']),
+  fn('clipboard_get', 'Lit le texte du presse-papiers.'),
+  fn('clipboard_set', 'Place un texte dans le presse-papiers.', { text: { type: 'string' } }, ['text']),
+  fn('find_files', "Cherche des fichiers par nom dans Documents, Bureau, Téléchargements et Images (25 max).", { query: { type: 'string' } }, ['query'])
+];
+
 export const LOCAL_TOOL_DEFINITIONS = [
+  ...SYSTEM_TOOL_DEFINITIONS,
   {
     type: 'function',
     function: {
@@ -95,6 +114,29 @@ export async function executeLocalTool(name: string, rawArgs: string, ctx: Local
       case 'notify_user':
         ctx.notify(String(args.title ?? 'EveFlow'), String(args.body ?? ''));
         return JSON.stringify({ ok: true });
+      case 'show_message':
+        ctx.showMessage?.(String(args.text ?? ''), typeof args.title === 'string' ? args.title : undefined);
+        return JSON.stringify({ ok: true });
+      case 'lock_session':
+      case 'open_app':
+      case 'open_url':
+      case 'media_key':
+      case 'clipboard_get':
+      case 'clipboard_set':
+      case 'find_files': {
+        const api = bridge();
+        if (!api) return JSON.stringify({ error: 'system actions unavailable outside Electron' });
+        const action: SystemAction =
+          name === 'lock_session' ? { type: 'lock' }
+          : name === 'open_app' ? { type: 'open-app', name: String(args.name ?? '') }
+          : name === 'open_url' ? { type: 'open-url', url: String(args.url ?? '') }
+          : name === 'media_key' ? { type: 'media', key: String(args.key ?? '') as 'mute' }
+          : name === 'clipboard_get' ? { type: 'clipboard-read' }
+          : name === 'clipboard_set' ? { type: 'clipboard-write', text: String(args.text ?? '') }
+          : { type: 'find-files', query: String(args.query ?? '') };
+        const result = await api.system.action(action);
+        return JSON.stringify(result.ok ? { ok: true, message: result.message, data: result.data } : { error: result.message ?? 'failed' });
+      }
       case 'write_shared_file': {
         const api = bridge();
         if (!api) return JSON.stringify({ error: 'file system unavailable outside Electron' });
