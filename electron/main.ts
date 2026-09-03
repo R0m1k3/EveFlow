@@ -76,7 +76,7 @@ function createTray(): void {
   try {
     const iconPath = app.isPackaged
       ? path.join(process.resourcesPath, 'icon.png')
-      : path.join(__dirname, '..', '..', 'build', 'icon.png');
+      : path.join(__dirname, '..', 'build', 'icon.png');
     let image = nativeImage.createFromPath(iconPath);
     if (image.isEmpty()) image = nativeImage.createEmpty();
     else image = image.resize({ width: 16, height: 16 });

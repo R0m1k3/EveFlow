@@ -37,7 +37,7 @@ async function loadRenderer(win: BrowserWindow): Promise<void> {
       log('WARN', 'window', `dev server unreachable (${(err as Error).message}), loading built bundle`);
     }
   }
-  const builtIndex = path.join(__dirname, '..', '..', 'dist', 'index.html');
+  const builtIndex = path.join(__dirname, '..', 'dist', 'index.html');
   if (fs.existsSync(builtIndex)) {
     await win.loadFile(builtIndex);
     return;
