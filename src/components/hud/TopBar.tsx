@@ -1,4 +1,4 @@
-import { Minus, X, Settings, PictureInPicture2, RefreshCw, Webhook } from 'lucide-react';
+import { Minus, X, Settings, PictureInPicture2, RefreshCw, Webhook, PanelRight } from 'lucide-react';
 import { bridge } from '../../lib/bridge';
 import { useClock } from '../../hooks/useMetrics';
 import { useHermes } from '../../state/hermes';
@@ -6,9 +6,11 @@ import { useSettings } from '../../state/settings';
 
 interface Props {
   onOpenSettings: () => void;
+  onToggleOps?: () => void;
+  opsBadge?: number;
 }
 
-export function TopBar({ onOpenSettings }: Props) {
+export function TopBar({ onOpenSettings, onToggleOps, opsBadge = 0 }: Props) {
   const now = useClock();
   const link = useHermes((s) => s.link);
   const linkDetail = useHermes((s) => s.linkDetail);
@@ -55,9 +57,15 @@ export function TopBar({ onOpenSettings }: Props) {
           <RefreshCw size={14} className={link === 'checking' ? 'spin' : undefined} />
         </button>
       </div>
-      <span className="clock">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</span>
+      <span className="clock">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
       <div className="controls">
-        <button className="icon-btn" title="Paramètres" onClick={onOpenSettings}><Settings size={16} /></button>
+        {onToggleOps && (
+          <button className="icon-btn ops-toggle" title="Panneau Hermes Ops" aria-label="Panneau Hermes Ops" onClick={onToggleOps} style={{ position: 'relative' }}>
+            <PanelRight size={16} />
+            {opsBadge > 0 && <span className="badge" style={{ position: 'absolute', top: 2, right: 2, minWidth: 14, height: 14, fontSize: 9, borderRadius: 7, background: 'var(--danger)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px' }}>{opsBadge}</span>}
+          </button>
+        )}
+        <button className="icon-btn" title="Paramètres (Ctrl+,)" aria-label="Paramètres" onClick={onOpenSettings}><Settings size={16} /></button>
         {api && (
           <>
             <button className="icon-btn" title="Mode compact flottant" onClick={() => api.window.setMode('compact')}><PictureInPicture2 size={16} /></button>

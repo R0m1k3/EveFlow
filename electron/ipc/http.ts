@@ -105,6 +105,8 @@ async function startStream(sender: WebContents, id: string, req: HttpProxyReques
     headers: headersToObject(response.headers)
   };
 
+  const onDestroyed = () => controller.abort();
+  sender.once('destroyed', onDestroyed);
   const pump = async () => {
     try {
       if (!response.body) {
@@ -133,7 +135,10 @@ async function startStream(sender: WebContents, id: string, req: HttpProxyReques
       if (e.name === 'AbortError') send({ id, type: 'end' });
       else send({ id, type: 'error', message: e.message || String(err) });
     } finally {
-      activeStreams.delete(id);
+      // Releases the socket when we bailed out early (idle timeout, renderer gone).
+      controller.abort();
+      sender.removeListener('destroyed', onDestroyed);
+      if (activeStreams.get(id) === controller) activeStreams.delete(id);
     }
   };
   void pump();
@@ -147,7 +152,11 @@ export function abortAllStreams(): void {
 
 export function registerHttpIpc(): void {
   ipcMain.handle(IPC.httpFetch, (_e, req: HttpProxyRequest) => proxyFetch(req));
-  ipcMain.handle(IPC.httpStreamStart, (event, id: string, req: HttpProxyRequest) => startStream(event.sender, id, req));
+  ipcMain.handle(IPC.httpStreamStart, (event, id: unknown, req: HttpProxyRequest) => {
+    if (typeof id !== 'string' || !id || id.length > 64 || activeStreams.has(id)) throw new Error('Identifiant de flux invalide');
+    if (!req || typeof req.url !== 'string') throw new Error('Requête invalide');
+    return startStream(event.sender, id, req);
+  });
   ipcMain.on(IPC.httpStreamAbort, (_e, id: string) => {
     const controller = activeStreams.get(id);
     if (controller) {

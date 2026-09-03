@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Download, Trash2, X, CheckCircle2, Cpu, Mic, Volume2, AlertTriangle, RefreshCw } from 'lucide-react';
 import type { VoiceModelStatus } from '../../../shared/voice';
 import { bridge } from '../../lib/bridge';
+import { useShallow } from 'zustand/react/shallow';
 import { useVoiceModels } from '../../state/voiceModels';
 import { useSettings } from '../../state/settings';
 
@@ -11,10 +12,11 @@ function formatMb(bytes: number): string {
 
 function ModelRow({ model }: { model: VoiceModelStatus }) {
   const progress = useVoiceModels((s) => s.progress[model.id]);
-  const { download, cancel, remove } = useVoiceModels();
-  const settings = useSettings((s) => s.settings);
+  const { download, cancel, remove } = useVoiceModels.getState();
+  const activeStt = useSettings((s) => s.settings.voice.localModel);
+  const activeTts = useSettings((s) => s.settings.speech.localModel);
   const update = useSettings((s) => s.update);
-  const isActive = model.kind === 'stt' ? settings.voice.localModel === model.id : settings.speech.localModel === model.id;
+  const isActive = model.kind === 'stt' ? activeStt === model.id : activeTts === model.id;
   const busy = !!progress && (progress.phase === 'download' || progress.phase === 'extract');
 
   const activate = () => {
@@ -59,7 +61,8 @@ function ModelRow({ model }: { model: VoiceModelStatus }) {
 }
 
 export function ModelsSection() {
-  const { models, engine, error, refresh, checkEngine } = useVoiceModels();
+  const { models, engine, error } = useVoiceModels(useShallow((s) => ({ models: s.models, engine: s.engine, error: s.error })));
+  const { refresh, checkEngine } = useVoiceModels.getState();
   useEffect(() => {
     void refresh();
     void checkEngine();

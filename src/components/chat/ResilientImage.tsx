@@ -40,6 +40,10 @@ export function ResilientImage({ src = '', alt, onOpen }: Props) {
       setResolved(cache.get(src)!);
       return;
     }
+    if (failures.has(src)) {
+      setError(failures.get(src)!);
+      return;
+    }
     if (src.startsWith('data:') || src.startsWith('blob:') || /^https?:\/\//i.test(src)) {
       ok(src);
       return;

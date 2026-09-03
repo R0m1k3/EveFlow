@@ -62,7 +62,7 @@ export function useMetrics(enabled = true, intervalMs = 2000): LiveMetrics {
 export function useClock(): Date {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000);
+    const timer = setInterval(() => setNow(new Date()), 15_000);
     return () => clearInterval(timer);
   }, []);
   return now;

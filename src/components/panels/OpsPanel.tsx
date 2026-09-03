@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import {
   Wrench, CalendarClock, Sparkles, Layers, History, Play, Pause, Trash2, Pencil, Plus, Save, X, RefreshCw,
   CheckCircle2, XCircle, Loader2, Bot, Cpu, GitBranch, Webhook, FolderOpen
@@ -142,7 +143,10 @@ function HistoryList() {
           <div
             key={r.id}
             className="row-item clickable"
+            role="button"
+            tabIndex={0}
             style={{ opacity: r.read ? 0.7 : 1 }}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLDivElement).click(); }}
             onClick={() => {
               markRead(r.id);
               addMessage({ role: 'assistant', content: r.output, source: 'cron', jobName: r.jobName, status: 'done', timestamp: new Date(r.at).getTime() || Date.now() });
@@ -222,7 +226,7 @@ function SessionsTab() {
   const transport = useHermes((s) => s.transport);
   const sessionId = useSettings((s) => s.settings.hermesSessionId);
   const setSessionId = useSettings((s) => s.setHermesSessionId);
-  const chat = useChat();
+  const chat = useChat.getState();
 
   const activeId = sessionId.replace(/^hs:/, '');
   const load = async (id: string) => {
@@ -255,7 +259,7 @@ function SessionsTab() {
       {sessions.length === 0 ? <div className="empty">Aucune session listée par Hermes.</div> : (
         <div className="list">
           {sessions.map((s) => (
-            <div key={s.id} className={`row-item clickable`} style={s.id === activeId ? { borderColor: 'var(--accent)' } : undefined} onClick={() => void load(s.id)}>
+            <div key={s.id} className="row-item clickable" role="button" tabIndex={0} style={s.id === activeId ? { borderColor: 'var(--accent)' } : undefined} onClick={() => void load(s.id)} onKeyDown={(e) => { if (e.key === 'Enter') void load(s.id); }}>
               <div className="main">
                 <span className="name">{s.title || s.id}</span>
                 <span className="meta">{[s.platform ?? s.source, s.message_count ? `${s.message_count} msg` : null, formatDateTime(s.updated_at ?? s.created_at)].filter(Boolean).join(' · ')}</span>
@@ -273,7 +277,9 @@ function SessionsTab() {
 }
 
 function LinkTab() {
-  const { link, linkDetail, health, capabilities, transport, models, webhook } = useHermes();
+  const { link, linkDetail, health, capabilities, transport, models, webhook } = useHermes(
+    useShallow((s) => ({ link: s.link, linkDetail: s.linkDetail, health: s.health, capabilities: s.capabilities, transport: s.transport, models: s.models, webhook: s.webhook }))
+  );
   const connect = useHermes((s) => s.connect);
   const hermes = useSettings((s) => s.settings.hermes);
   const [info, setInfo] = useState<{ sharedDir: string; logPath: string; version: string } | null>(null);
@@ -311,7 +317,7 @@ function LinkTab() {
           <div className="section-title"><CheckCircle2 size={12} /> Santé</div>
           <dl className="kv">
             {Object.entries(checks).map(([k, v]) => (
-              <><dt key={`${k}-t`}>{k}</dt><dd key={`${k}-d`}>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</dd></>
+              <Fragment key={k}><dt>{k}</dt><dd>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</dd></Fragment>
             ))}
           </dl>
         </>

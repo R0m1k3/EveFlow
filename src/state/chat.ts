@@ -53,6 +53,10 @@ interface ChatStore {
   hudOverride: HudState | null;
   error: string | null;
   draft: string;
+  /** Incremented to make the core flash briefly. */
+  pingCount: number;
+  /** Time to first token of the current reply, in ms. */
+  latencyMs: number | null;
 
   addMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<Pick<ChatMessage, 'id' | 'timestamp'>>) => string;
   updateMessage: (id: string, patch: Partial<ChatMessage> | ((m: ChatMessage) => Partial<ChatMessage>)) => void;
@@ -68,6 +72,8 @@ interface ChatStore {
   setHudOverride: (state: HudState | null) => void;
   setError: (error: string | null) => void;
   setDraft: (draft: string) => void;
+  ping: () => void;
+  setLatency: (ms: number | null) => void;
 }
 
 const MAX_MESSAGES = 400;
@@ -83,6 +89,8 @@ export const useChat = create<ChatStore>((set, get) => ({
   hudOverride: null,
   error: null,
   draft: '',
+  pingCount: 0,
+  latencyMs: null,
 
   addMessage: (message) => {
     const id = message.id ?? uid('msg');
@@ -137,5 +145,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   },
   setHudOverride: (hudOverride) => set({ hudOverride }),
   setError: (error) => set({ error }),
-  setDraft: (draft) => set({ draft })
+  setDraft: (draft) => set({ draft }),
+  ping: () => set((s) => ({ pingCount: s.pingCount + 1 })),
+  setLatency: (latencyMs) => set({ latencyMs })
 }));

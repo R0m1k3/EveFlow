@@ -16,7 +16,15 @@ export function registerVoiceIpc(): void {
     await removeModel(id);
     return listModels();
   });
-  ipcMain.handle(VOICE_IPC.transcribe, (_e, req: TranscribeRequest) => transcribe(req));
-  ipcMain.handle(VOICE_IPC.synthesize, (_e, req: SynthesizeRequest) => synthesize(req));
+  ipcMain.handle(VOICE_IPC.transcribe, (_e, req: TranscribeRequest) => {
+    if (!req || !(req.wav instanceof Uint8Array) || req.wav.byteLength < 44 || req.wav.byteLength > 64 * 1024 * 1024) throw new Error('Audio invalide');
+    if (typeof req.modelId !== 'string') throw new Error('Modèle invalide');
+    return transcribe({ ...req, language: typeof req.language === 'string' ? req.language.slice(0, 8) : 'auto' });
+  });
+  ipcMain.handle(VOICE_IPC.synthesize, (_e, req: SynthesizeRequest) => {
+    if (!req || typeof req.text !== 'string' || !req.text.trim() || req.text.length > 5000) throw new Error('Texte invalide');
+    if (typeof req.modelId !== 'string') throw new Error('Modèle invalide');
+    return synthesize({ ...req, speaker: Number.isFinite(req.speaker) ? req.speaker : 0, speed: Number.isFinite(req.speed) ? req.speed : 1 });
+  });
   ipcMain.handle(VOICE_IPC.unload, (_e, id?: string) => unload(id));
 }

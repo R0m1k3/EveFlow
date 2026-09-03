@@ -19,13 +19,22 @@ let child: UtilityProcess | null = null;
 let nextId = 1;
 const pending = new Map<number, Pending>();
 
+function rejectAll(message: string): void {
+  for (const [id, p] of pending) {
+    clearTimeout(p.timer);
+    p.reject(new Error(message));
+    pending.delete(id);
+  }
+}
+
 function spawn(): UtilityProcess {
   if (child) return child;
   const script = path.join(__dirname, 'voice-worker.js');
-  child = utilityProcess.fork(script, [], { serviceName: 'eveflow-voice', stdio: 'pipe' });
-  child.stdout?.on('data', (d: Buffer) => log('DEBUG', 'voice-worker', d.toString().trim()));
-  child.stderr?.on('data', (d: Buffer) => log('WARN', 'voice-worker', d.toString().trim()));
-  child.on('message', (msg: { id: number; ok: boolean; result?: unknown; error?: string }) => {
+  const proc = utilityProcess.fork(script, [], { serviceName: 'eveflow-voice', stdio: 'pipe' });
+  child = proc;
+  proc.stdout?.on('data', (d: Buffer) => log('DEBUG', 'voice-worker', d.toString().trim()));
+  proc.stderr?.on('data', (d: Buffer) => log('WARN', 'voice-worker', d.toString().trim()));
+  proc.on('message', (msg: { id: number; ok: boolean; result?: unknown; error?: string }) => {
     const p = pending.get(msg.id);
     if (!p) return;
     pending.delete(msg.id);
@@ -33,17 +42,15 @@ function spawn(): UtilityProcess {
     if (msg.ok) p.resolve(msg.result);
     else p.reject(new Error(msg.error ?? 'erreur moteur vocal'));
   });
-  child.on('exit', (code) => {
+  proc.on('exit', (code) => {
     log(code === 0 ? 'INFO' : 'ERROR', 'voice-worker', `exited with code ${code}`);
+    // A newer worker may already have replaced this one; only clean up if we are still current.
+    if (child !== proc) return;
     child = null;
-    for (const [id, p] of pending) {
-      clearTimeout(p.timer);
-      p.reject(new Error('Le moteur vocal local s’est arrêté de façon inattendue.'));
-      pending.delete(id);
-    }
+    rejectAll('Le moteur vocal local s’est arrêté de façon inattendue.');
   });
   log('INFO', 'voice', 'voice worker started');
-  return child;
+  return proc;
 }
 
 function request<T>(message: Record<string, unknown>, timeoutMs = 120_000): Promise<T> {
@@ -53,9 +60,20 @@ function request<T>(message: Record<string, unknown>, timeoutMs = 120_000): Prom
     const timer = setTimeout(() => {
       pending.delete(id);
       reject(new Error('Délai dépassé pour le moteur vocal local.'));
+      // The worker handles requests synchronously: a stuck request wedges everything behind it.
+      if (child === proc) {
+        log('WARN', 'voice', 'worker unresponsive, restarting');
+        stopEngine();
+      }
     }, timeoutMs);
     pending.set(id, { resolve: (v) => resolve(v as T), reject, timer });
-    proc.postMessage({ id, ...message });
+    try {
+      proc.postMessage({ id, ...message });
+    } catch (err) {
+      pending.delete(id);
+      clearTimeout(timer);
+      reject(err as Error);
+    }
   });
 }
 
@@ -76,21 +94,31 @@ export async function engineStatus(): Promise<VoiceEngineStatus> {
 }
 
 export function transcribe(req: TranscribeRequest): Promise<TranscribeResult> {
-  return request<TranscribeResult>({ type: 'transcribe', model: modelRef(req.modelId), wav: req.wav, language: req.language }, 180_000);
+  // Binary payloads are base64-encoded for the worker: the utility process channel rejects external buffers.
+  const wav = Buffer.from(req.wav.buffer, req.wav.byteOffset, req.wav.byteLength).toString('base64');
+  return request<TranscribeResult>({ type: 'transcribe', model: modelRef(req.modelId), wav, language: req.language }, 180_000);
 }
 
-export function synthesize(req: SynthesizeRequest): Promise<SynthesizeResult> {
-  return request<SynthesizeResult>({ type: 'synthesize', model: modelRef(req.modelId), text: req.text, speaker: req.speaker, speed: req.speed }, 180_000);
+export async function synthesize(req: SynthesizeRequest): Promise<SynthesizeResult> {
+  const result = await request<Omit<SynthesizeResult, 'wav'> & { wav: string }>(
+    { type: 'synthesize', model: modelRef(req.modelId), text: req.text, speaker: req.speaker, speed: req.speed },
+    180_000
+  );
+  const buffer = Buffer.from(result.wav, 'base64');
+  return { ...result, wav: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength) };
 }
 
-export function unload(modelId?: string): Promise<unknown> {
-  if (!child) return Promise.resolve({ ok: true });
-  return request({ type: 'unload', modelId }, 20_000);
+/** Native model memory is only released deterministically by restarting the worker. */
+export function unload(_modelId?: string): Promise<unknown> {
+  stopEngine();
+  return Promise.resolve({ ok: true });
 }
 
 export function stopEngine(): void {
-  if (child) {
-    child.kill();
-    child = null;
+  const proc = child;
+  child = null;
+  if (proc) {
+    rejectAll('Moteur vocal redémarré.');
+    proc.kill();
   }
 }

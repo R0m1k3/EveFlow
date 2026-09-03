@@ -21,23 +21,35 @@ interface Props {
 
 function Toggle({ on, onChange, label, hint }: { on: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
   return (
-    <div className="switch" onClick={() => onChange(!on)}>
+    <button type="button" role="switch" aria-checked={on} className="switch" onClick={() => onChange(!on)}>
       <div className="text">
         <span>{label}</span>
         {hint && <small>{hint}</small>}
       </div>
       <span className={`toggle${on ? ' on' : ''}`} />
-    </div>
+    </button>
   );
 }
 
 type TestState = { status: 'idle' | 'running' | 'ok' | 'fail'; message: string };
 
+function TestResult({ t }: { t: TestState }) {
+  if (t.status === 'idle') return null;
+  return (
+    <div className={`test-result ${t.status === 'ok' ? 'ok' : t.status === 'fail' ? 'fail' : ''}`}>
+      {t.status === 'running' ? <Loader2 size={13} className="spin" /> : t.status === 'ok' ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+      <span>{t.message}</span>
+    </div>
+  );
+}
+
 export function SettingsDrawer({ onClose }: Props) {
   const settings = useSettings((s) => s.settings);
   const update = useSettings((s) => s.update);
   const reset = useSettings((s) => s.reset);
-  const hermesStore = useHermes();
+  const hermesModels = useHermes((s) => s.models);
+  const hermesWebhook = useHermes((s) => s.webhook);
+  const hermesConnect = useHermes((s) => s.connect);
   const micDevices = useVoice((s) => s.micDevices);
   const voiceModels = useVoiceModels((s) => s.models);
   const refreshModels = useVoiceModels((s) => s.refresh);
@@ -74,7 +86,7 @@ export function SettingsDrawer({ onClose }: Props) {
       }
       const via = bridge() ? 'via Electron' : 'via navigateur';
       setHermesTest({ status: 'ok', message: `${health.status} (${via})${caps}` });
-      void hermesStore.connect();
+      void hermesConnect();
     } catch (err) {
       setHermesTest({ status: 'fail', message: (err as Error).message });
     }
@@ -105,14 +117,6 @@ export function SettingsDrawer({ onClose }: Props) {
     const status = await api.hermes.webhookRestart();
     useHermes.setState({ webhook: status });
   };
-
-  const Result = ({ t }: { t: TestState }) =>
-    t.status === 'idle' ? null : (
-      <div className={`test-result ${t.status === 'ok' ? 'ok' : t.status === 'fail' ? 'fail' : ''}`}>
-        {t.status === 'running' ? <Loader2 size={13} className="spin" /> : t.status === 'ok' ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
-        <span>{t.message}</span>
-      </div>
-    );
 
   const nav: Array<[Section, string]> = [
     ['hermes', 'Hermes'],
@@ -155,7 +159,7 @@ export function SettingsDrawer({ onClose }: Props) {
                   <label>Modèle</label>
                   <input className="input" list="hermes-models" value={settings.hermes.model} placeholder="(défaut du serveur)" onChange={(e) => update({ hermes: { model: e.target.value } })} />
                   <datalist id="hermes-models">
-                    {hermesStore.models.map((m) => <option key={m.id} value={m.id} />)}
+                    {hermesModels.map((m) => <option key={m.id} value={m.id} />)}
                   </datalist>
                 </div>
                 <div className="field">
@@ -191,7 +195,7 @@ export function SettingsDrawer({ onClose }: Props) {
               <div className="row" style={{ marginTop: 10 }}>
                 <button className="btn primary small" onClick={() => void testHermes()}><Play size={13} /> Tester la liaison</button>
               </div>
-              <div style={{ marginTop: 8 }}><Result t={hermesTest} /></div>
+              <div style={{ marginTop: 8 }}><TestResult t={hermesTest} /></div>
             </div>
           </>
         )}
@@ -284,7 +288,7 @@ export function SettingsDrawer({ onClose }: Props) {
             <div className="row" style={{ marginTop: 10 }}>
               <button className="btn small" onClick={() => void testStt()} disabled={settings.voice.provider === 'browser'}><Mic size={13} /> Tester la reconnaissance</button>
             </div>
-            <div style={{ marginTop: 8 }}><Result t={sttTest} /></div>
+            <div style={{ marginTop: 8 }}><TestResult t={sttTest} /></div>
           </div>
         )}
 
@@ -381,7 +385,7 @@ export function SettingsDrawer({ onClose }: Props) {
             <div className="row" style={{ marginTop: 10 }}>
               <button className="btn small" onClick={testTts} disabled={settings.speech.provider === 'off'}><Volume2 size={13} /> Tester la voix</button>
             </div>
-            <div style={{ marginTop: 8 }}><Result t={ttsTest} /></div>
+            <div style={{ marginTop: 8 }}><TestResult t={ttsTest} /></div>
           </div>
         )}
 
@@ -412,7 +416,7 @@ export function SettingsDrawer({ onClose }: Props) {
             </div>
             <div className="row">
               <button className="btn primary small" onClick={() => void applyWebhook()} disabled={!bridge()}>Appliquer et redémarrer</button>
-              {hermesStore.webhook && <span className={`status-pill ${hermesStore.webhook.listening ? 'online' : 'offline'}`}>{hermesStore.webhook.listening ? `port ${hermesStore.webhook.port}` : hermesStore.webhook.error ?? 'inactif'}</span>}
+              {hermesWebhook && <span className={`status-pill ${hermesWebhook.listening ? 'online' : 'offline'}`}>{hermesWebhook.listening ? `port ${hermesWebhook.port}` : hermesWebhook.error ?? 'inactif'}</span>}
             </div>
           </div>
         )}
@@ -434,13 +438,13 @@ export function SettingsDrawer({ onClose }: Props) {
               <div className="theme-swatches">
                 {(['arc', 'gold', 'crimson', 'emerald'] as HudTheme[]).map((t) => {
                   const colors: Record<HudTheme, string> = { arc: '#34e4ff', gold: '#ffc35a', crimson: '#ff5c6c', emerald: '#4ef0a8' };
-                  return <button key={t} className={`swatch${settings.theme === t ? ' active' : ''}`} style={{ background: colors[t] }} title={t} onClick={() => update({ theme: t })} />;
+                  return <button key={t} className={`swatch${settings.theme === t ? ' active' : ''}`} style={{ background: colors[t] }} title={t} aria-label={`Thème ${t}`} aria-pressed={settings.theme === t} onClick={() => update({ theme: t })} />;
                 })}
               </div>
             </div>
             <div className="field">
               <label>Raccourcis globaux</label>
-              <span className="hint"><span className="kbd">Ctrl+Shift+Espace</span> micro · <span className="kbd">Ctrl+Shift+J</span> afficher/masquer · <span className="kbd">Ctrl+Shift+Échap</span> couper la voix</span>
+              <span className="hint"><span className="kbd">Ctrl+Shift+Espace</span> micro · <span className="kbd">Ctrl+Shift+J</span> afficher/masquer · <span className="kbd">Ctrl+Alt+Échap</span> couper la voix · <span className="kbd">Ctrl+K</span> saisie</span>
             </div>
             <div className="divider" />
             <button className="btn danger small" onClick={() => { if (confirm('Réinitialiser tous les paramètres ?')) reset(); }}><RotateCcw size={13} /> Réinitialiser</button>

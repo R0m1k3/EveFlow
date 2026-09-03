@@ -12,18 +12,36 @@ interface Props {
 export function ChatPanel({ compact }: Props) {
   const messages = useChat((s) => s.messages);
   const clear = useChat((s) => s.clear);
-  const settings = useSettings((s) => s.settings);
+  const assistantName = useSettings((s) => s.settings.assistantName);
+  const userName = useSettings((s) => s.settings.userName);
+  const showReasoning = useSettings((s) => s.settings.ui.showReasoning);
   const listRef = useRef<HTMLDivElement>(null);
+  const programmatic = useRef(false);
   const [zoom, setZoom] = useState<string | null>(null);
   const [stick, setStick] = useState(true);
 
   useEffect(() => {
     if (!stick) return;
     const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    programmatic.current = true;
+    el.scrollTop = el.scrollHeight;
   }, [messages, stick]);
 
+  useEffect(() => {
+    if (!zoom) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setZoom(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zoom]);
+
   const onScroll = () => {
+    if (programmatic.current) {
+      programmatic.current = false;
+      return;
+    }
     const el = listRef.current;
     if (!el) return;
     setStick(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
@@ -47,7 +65,7 @@ export function ChatPanel({ compact }: Props) {
       <div ref={listRef} className={`chat-list${compact ? ' compact' : ''}`} onScroll={onScroll}>
         {visible.length === 0 && (
           <div className="empty">
-            {compact ? 'En attente…' : `Canal ouvert. Parlez ou écrivez à ${settings.assistantName}.`}
+            {compact ? 'En attente…' : `Canal ouvert. Parlez ou écrivez à ${assistantName}.`}
             {!compact && (
               <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
                 <span className="kbd">Ctrl</span> + <span className="kbd">Shift</span> + <span className="kbd">Espace</span> active le micro depuis n’importe où.
@@ -59,9 +77,9 @@ export function ChatPanel({ compact }: Props) {
           <MessageBubble
             key={m.id}
             message={m}
-            assistantName={settings.assistantName}
-            userName={settings.userName}
-            showReasoning={settings.ui.showReasoning}
+            assistantName={assistantName}
+            userName={userName}
+            showReasoning={showReasoning}
             compact={compact}
             onOpenImage={setZoom}
           />

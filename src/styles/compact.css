@@ -7,7 +7,15 @@
   background: linear-gradient(180deg, rgba(5, 12, 22, var(--compact-opacity, 0.92)), rgba(2, 6, 12, var(--compact-opacity, 0.92)));
   border: 1px solid rgba(var(--accent-rgb), 0.3);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 30px rgba(var(--accent-rgb), 0.12);
-  backdrop-filter: blur(16px);
+}
+.compact-body .panel {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+.compact-body .panel.bracket::before,
+.compact-body .panel.bracket::after {
+  display: none;
 }
 .compact-head {
   display: flex;
@@ -29,7 +37,7 @@
 }
 .compact-core {
   position: relative;
-  height: 220px;
+  height: clamp(140px, 38vh, 220px);
   flex-shrink: 0;
 }
 .compact-core canvas {

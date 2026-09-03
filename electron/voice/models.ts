@@ -11,9 +11,13 @@ import * as tar from 'tar';
 import unbzip2 from 'unbzip2-stream';
 import { VOICE_IPC, type VoiceDownloadProgress, type VoiceModelSpec, type VoiceModelStatus } from '../../shared/voice';
 import { VOICE_CATALOG, findModel } from './catalog';
+import { stopEngine } from './engine';
 import { log } from '../logger';
 
 const active = new Map<string, AbortController>();
+/** Windows keeps files locked briefly (AV scans, memory-mapped models): retry removals. */
+const RM = { recursive: true, force: true, maxRetries: 10, retryDelay: 200 } as const;
+const DOWNLOAD_IDLE_MS = 60_000;
 
 export function modelsDir(): string {
   const dir = path.join(app.getPath('userData'), 'models');
@@ -59,7 +63,8 @@ export function listModels(): VoiceModelStatus[] {
 export async function removeModel(id: string): Promise<void> {
   const spec = findModel(id);
   if (!spec) throw new Error(`Modèle inconnu : ${id}`);
-  await fs.promises.rm(modelDir(spec), { recursive: true, force: true });
+  stopEngine(); // releases memory-mapped model files before deleting them
+  await fs.promises.rm(modelDir(spec), RM);
   log('INFO', 'voice', `model removed: ${id}`);
 }
 
@@ -78,8 +83,14 @@ export async function downloadModel(id: string, sender: WebContents | null): Pro
   };
 
   const tmpDir = path.join(modelsDir(), `.tmp-${spec.id}`);
-  await fs.promises.rm(tmpDir, { recursive: true, force: true });
+  await fs.promises.rm(tmpDir, RM);
   await fs.promises.mkdir(tmpDir, { recursive: true });
+  // Abort the transfer when no byte arrives for a while (fetch itself has no inactivity timeout).
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  const touch = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => controller.abort(new Error('Téléchargement interrompu (aucune donnée reçue)')), DOWNLOAD_IDLE_MS);
+  };
 
   try {
     log('INFO', 'voice', `downloading ${spec.id} from ${spec.url}`);
@@ -88,9 +99,11 @@ export async function downloadModel(id: string, sender: WebContents | null): Pro
     const total = Number(response.headers.get('content-length')) || Math.round(spec.sizeMb * 1024 * 1024);
     let received = 0;
     let lastReport = 0;
+    touch();
     const counter = new Transform({
       transform(chunk: Buffer, _enc, cb) {
         received += chunk.length;
+        touch();
         const now = Date.now();
         if (now - lastReport > 250) {
           lastReport = now;
@@ -116,19 +129,30 @@ export async function downloadModel(id: string, sender: WebContents | null): Pro
     if (missing.length) throw new Error(`Archive incomplète, fichiers manquants : ${missing.join(', ')}`);
 
     const finalDir = modelDir(spec);
-    await fs.promises.rm(finalDir, { recursive: true, force: true });
-    await fs.promises.rename(extracted, finalDir);
-    await fs.promises.rm(tmpDir, { recursive: true, force: true });
+    if (isInstalled(spec)) stopEngine();
+    await fs.promises.rm(finalDir, RM);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await fs.promises.rename(extracted, finalDir);
+        break;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code ?? '';
+        if (attempt >= 10 || !['EPERM', 'EBUSY', 'ENOTEMPTY', 'EACCES'].includes(code)) throw err;
+        await new Promise((r) => setTimeout(r, 300));
+      }
+    }
+    await fs.promises.rm(tmpDir, RM);
     report({ phase: 'done', received: total, total, percent: 100 });
     log('INFO', 'voice', `model installed: ${spec.id}`);
   } catch (err) {
-    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
-    const e = err as Error;
-    const cancelled = e.name === 'AbortError' || controller.signal.aborted;
+    await fs.promises.rm(tmpDir, RM).catch(() => undefined);
+    const e = (controller.signal.reason instanceof Error ? controller.signal.reason : err) as Error;
+    const cancelled = (e.name === 'AbortError' || controller.signal.aborted) && !(controller.signal.reason instanceof Error);
     report({ phase: cancelled ? 'cancelled' : 'error', received: 0, total: 0, percent: 0, message: cancelled ? 'annulé' : e.message });
     log(cancelled ? 'INFO' : 'ERROR', 'voice', `download ${spec.id} ${cancelled ? 'cancelled' : 'failed: ' + e.message}`);
     if (!cancelled) throw new Error(e.message);
   } finally {
+    if (idleTimer) clearTimeout(idleTimer);
     active.delete(id);
   }
   return listModels().find((m) => m.id === id)!;

@@ -100,6 +100,7 @@ export const IPC = {
   windowControl: 'window:control',
   windowSetMode: 'window:set-mode',
   windowModeChanged: 'window:mode-changed',
+  windowVisibility: 'window:visibility',
   log: 'log:write',
   storeGet: 'store:get',
   storeSet: 'store:set',

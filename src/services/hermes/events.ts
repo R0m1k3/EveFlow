@@ -212,6 +212,7 @@ export function normalizeCompletionChunk(
 ): { events: HermesStreamEvent[]; finishReason: string | null } {
   const events: HermesStreamEvent[] = [];
   if (!isRec(chunk)) return { events, finishReason: null };
+  if (isRec(chunk.usage)) events.push({ kind: 'completed', status: 'usage', usage: chunk.usage as HermesUsage });
   const choice = Array.isArray(chunk.choices) && isRec(chunk.choices[0]) ? (chunk.choices[0] as Rec) : null;
   if (!choice) return { events, finishReason: null };
   const delta = isRec(choice.delta) ? (choice.delta as Rec) : isRec(choice.message) ? (choice.message as Rec) : null;

@@ -104,3 +104,14 @@
   background: linear-gradient(90deg, var(--accent), var(--success));
   transition: width 60ms linear;
 }
+
+.switch {
+  width: 100%;
+  background: transparent;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}

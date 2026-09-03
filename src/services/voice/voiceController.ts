@@ -51,6 +51,7 @@ class VoiceController {
   private browser = new BrowserRecognizer();
   private handsFreeTimer: ReturnType<typeof setTimeout> | null = null;
   private stopping = false;
+  private startSeq = 0;
   private unsubscribeVoice: (() => void) | null = null;
 
   init(): void {
@@ -59,6 +60,13 @@ class VoiceController {
     this.unsubscribeVoice = useVoice.subscribe((state, prev) => {
       if (prev.tts !== 'idle' && state.tts === 'idle' && state.handsFree && state.phase === 'off') {
         this.scheduleHandsFree(350);
+      }
+    });
+    // Hands-free also re-arms when a reply ends without speech (voice off, empty answer, error).
+    useChat.subscribe((state, prev) => {
+      if (prev.isSending && !state.isSending) {
+        const v = useVoice.getState();
+        if (v.handsFree && v.phase === 'off' && !speech.isSpeaking()) this.scheduleHandsFree(400);
       }
     });
   }
@@ -83,6 +91,7 @@ class VoiceController {
     if (on && !this.isListening && !speech.isSpeaking()) void this.start();
     if (!on) {
       this.clearHandsFreeTimer();
+      if (this.isListening) this.cancel();
     }
   }
 
@@ -90,7 +99,8 @@ class VoiceController {
     this.clearHandsFreeTimer();
     this.handsFreeTimer = setTimeout(() => {
       const v = useVoice.getState();
-      if (v.handsFree && v.phase === 'off' && !useChat.getState().isSending && !speech.isSpeaking()) void this.start();
+      const bargeIn = useSettings.getState().settings.voice.bargeIn;
+      if (v.handsFree && v.phase === 'off' && !useChat.getState().isSending && (bargeIn || !speech.isSpeaking())) void this.start(true);
     }, delay);
   }
 
@@ -99,14 +109,16 @@ class VoiceController {
     this.handsFreeTimer = null;
   }
 
-  async start(): Promise<void> {
+  /** @param auto true when re-armed by the hands-free loop (no chime, patient timeout). */
+  async start(auto = false): Promise<void> {
     const voice = useVoice.getState();
     if (voice.phase !== 'off') return;
     const settings = useSettings.getState().settings.voice;
+    const seq = ++this.startSeq;
     voice.setError(null);
     voice.setInterim('');
-    if (!settings.bargeIn) speech.stop();
-    else speech.stop();
+    // Barge-in keeps the assistant talking while the mic opens (echo cancellation handles the overlap).
+    if (!(auto && settings.bargeIn)) speech.stop();
     useChat.getState().setHud('listening');
     voice.setPhase('arming');
 
@@ -125,18 +137,29 @@ class VoiceController {
           silenceMs: settings.silenceMs,
           speechRatio: SENSITIVITY_RATIO[sensitivity],
           minRms: SENSITIVITY_MIN_RMS[sensitivity],
-          noSpeechTimeoutMs: useVoice.getState().handsFree ? 20_000 : 9_000
+          noSpeechTimeoutMs: useVoice.getState().handsFree ? Number.POSITIVE_INFINITY : 9_000
         },
         callbacks: {
-          onLevel: (level) => useVoice.getState().setInputLevel(level),
-          onSpeechStart: () => useVoice.getState().setPhase('speech'),
+          onLevel: (level) => {
+            const q = Math.round(level * 20) / 20;
+            if (q !== useVoice.getState().inputLevel) useVoice.getState().setInputLevel(q);
+          },
+          onSpeechStart: () => {
+            useVoice.getState().setPhase('speech');
+            useChat.getState().ping();
+          },
           onUtterance: (wav) => void this.transcribe(wav),
           onEnd: (reason) => this.onCaptureEnd(reason),
           onError: (message) => useVoice.getState().setError(message)
         }
       });
+      if (seq !== this.startSeq || useVoice.getState().phase !== 'arming') {
+        // stop() was called while the microphone was opening.
+        this.capture.cancel();
+        return;
+      }
       useVoice.getState().setPhase('listening');
-      this.playChime(true);
+      if (!auto) this.playChime(true);
     } catch (err) {
       const message = (err as Error).message;
       useVoice.getState().setError(message);
@@ -166,6 +189,7 @@ class VoiceController {
 
   stop(): void {
     this.stopping = true;
+    this.startSeq++;
     this.clearHandsFreeTimer();
     if (useSettings.getState().settings.voice.provider === 'browser') this.browser.stop();
     else if (this.capture.isActive) this.capture.stop('stopped');
@@ -174,6 +198,7 @@ class VoiceController {
   }
 
   cancel(): void {
+    this.startSeq++;
     this.clearHandsFreeTimer();
     this.browser.stop();
     this.capture.cancel();
@@ -224,6 +249,7 @@ class VoiceController {
       this.attentionUntil = 0;
       if (text.trim()) {
         await sendMessage(text, [], 'voice');
+        if (useVoice.getState().handsFree && !speech.isSpeaking()) this.scheduleHandsFree(350);
       } else {
         voice.setError('Transcription vide.');
         useChat.getState().setHud('idle');
@@ -237,6 +263,7 @@ class VoiceController {
       useChat.getState().setHud('error');
       Log.error('voice', `transcription failed: ${message}`);
       setTimeout(() => useChat.getState().setHud('idle'), 3000);
+      if (useVoice.getState().handsFree) this.scheduleHandsFree(3000);
     }
   }
 
