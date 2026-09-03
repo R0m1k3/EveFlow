@@ -1,83 +1,111 @@
-# 🚀 EveFlow — Compagnon de Bureau Rétro-Futuriste 3D
+# EveFlow 2 — Interface vocale JARVIS pour Hermes Agent
 
-[![Windows Version](https://img.shields.io/badge/OS-Windows-blue.svg?style=flat-square&logo=windows)](https://github.com/R0m1k3/EveFlow)
-[![Version](https://img.shields.io/badge/version-1.0.8-brightgreen.svg?style=flat-square)](https://github.com/R0m1k3/EveFlow/releases/tag/v1.0.8)
+[![Build](https://img.shields.io/github/actions/workflow/status/R0m1k3/EveFlow/windows-release.yml?style=flat-square)](https://github.com/R0m1k3/EveFlow/actions)
+[![Version](https://img.shields.io/badge/version-2.0.0-brightgreen.svg?style=flat-square)](https://github.com/R0m1k3/EveFlow/releases)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey.svg?style=flat-square)](LICENSE)
 
-**EveFlow** est un compagnon de bureau Windows immersif haut de gamme, combinant une esthétique cyberpunk rétro-futuriste soignée et des technologies d'intelligence artificielle avancées. Il intègre un assistant virtuel en 3D nommé **Eve**, animé en temps réel avec des expressions émotionnelles dynamiques et synchronisé avec des services de synthèse vocale (TTS/STT) locaux et des architectures multi-agents.
+**EveFlow** est un compagnon de bureau Windows qui transforme [Hermes Agent](https://hermes-agent.nousresearch.com/) en assistant vocal à la JARVIS : un noyau holographique réactif au son, une conversation en streaming, les outils, sous-agents, approbations, crons, skills et sessions d'Hermes pilotés depuis un seul HUD.
+
+La version 2 est une réécriture complète : plus de robot 3D, un pipeline vocal fiable (AudioWorklet + détection d'activité vocale), un client Hermes qui exploite l'API serveur complète (runs SSE, sessions, jobs, capabilities) et une architecture Electron sécurisée (sandbox, `webSecurity` actif, réseau proxifié par le processus principal).
 
 ---
 
-## 📸 Aperçu de l'Interface
+## Fonctionnalités
 
-Découvrez le cockpit de contrôle immersif et le mode widget compact d'EveFlow :
+### Noyau JARVIS
+* Arc reactor rendu en Canvas 2D : anneaux gradués, arcs segmentés et spectre radial calculé sur le **vrai signal audio** (voix synthétisée ou microphone).
+* États visuels : veille, écoute, analyse (outils en cours), transmission, attention (approbation), anomalie, succès.
+* Quatre thèmes (arc cyan, gold, crimson, emerald), mode animations réduites.
+* Mode compact flottant toujours au premier plan, opacité réglable.
 
+### Voix
+* **Capture micro** via AudioWorklet à 16 kHz, sans monitoring du micro dans les haut-parleurs, avec annulation d'écho et réduction de bruit.
+* **Détection d'activité vocale** (seuil adaptatif, sensibilité et silence de fin réglables) : l'enregistrement s'arrête tout seul quand vous avez fini de parler.
+* **Mains libres** : le micro se réactive après chaque réponse.
+* **STT** : n'importe quelle API `/v1/audio/transcriptions` compatible OpenAI (Qwen3-ASR, Whisper, Speaches, faster-whisper-server, LocalAI, OpenAI). Repli sur la reconnaissance Chromium.
+* **TTS** : API `/v1/audio/speech` compatible OpenAI (Kokoro, Piper, OpenAI…), voix système Windows ou Google Translate. Lecture phrase par phrase pendant le streaming, préchargement du segment suivant, coupure instantanée.
+* Raccourcis globaux : `Ctrl+Shift+Espace` (micro), `Ctrl+Shift+J` (afficher/masquer), `Ctrl+Shift+Échap` (couper la voix).
 
+### Hermes, toute la puissance
+* Découverte automatique via `GET /v1/capabilities` et `GET /health/detailed`, choix du transport le plus riche :
+  1. **Runs API** (`POST /v1/runs` + `GET /v1/runs/{id}/events`) : deltas, outils, sous-agents, `approval.request`, `run.completed`, arrêt (`/stop`) et injection de consignes en cours de run (`/steer`).
+  2. **Sessions API** (`/api/sessions/{id}/chat/stream`) : mémoire côté serveur, fork, suppression, relecture de l'historique.
+  3. **Chat completions** OpenAI (`/v1/chat/completions`) avec `hermes.tool.progress`, continuité de session (`X-Hermes-Session-Id`) et outils EveFlow côté client (état du HUD, fichiers partagés, notifications).
+* Mémoire longue durée via `X-Hermes-Session-Key`.
+* **Approbations** d'outils affichées dans le HUD : une fois, pour la session, toujours, refuser.
+* **Crons** : création en langage naturel (`every 1h`, `weekdays at 9am`, `in 30m`, expression cron), pause/reprise, exécution immédiate, édition, historique des résultats lus à voix haute.
+* **Skills et toolsets** exposés par le serveur, **sessions** navigables.
+* **Webhook local** (`POST http://<pc>:7842/eveflow/hook`) pour recevoir les livraisons de crons, le miroir Telegram ou n'importe quel script, avec secret optionnel.
+* Images inline (URL, data URL, fichiers du dossier partagé `Documents/EveFlow_Shared`).
 
----
-
-## ✨ Fonctionnalités Clés
-
-* **🤖 Avatar 3D Eve Interactif** : Un modèle 3D animé sous WebGL avec des shaders personnalisés pour ses yeux LED. Ses expressions (joie, tristesse, réflexion, colère, surprise, neutre), son clignotement de paupières et ses mouvements de bras s'adaptent de manière organique selon le contexte et la parole.
-* **🌌 Interface Transparent Glassmorphic Premium** : Fenêtre sans bordure avec un effet de verre dépoli haut de gamme, s'intégrant magnifiquement à votre bureau Windows sans perturber votre espace de travail.
-* **🔄 Deux Modes d'Affichage Dynamiques** :
-  * **Mode Cockpit** : Interface complète de discussion avec panneau de commande, historique des messages, affichage des logs et télémétrie matérielle avancée.
-  * **Mode Flottant (Widget)** : Une carte compacte translucide toujours au premier plan, plaçant l'avatar d'Eve directement dans le coin de votre écran pour une compagnie discrète.
-* **🔌 Serveur Webhook Intégré (Hermes)** : Port d'écoute webhook local (`7842`) permettant la réception d'événements et de notifications poussés en temps réel par des agents tiers (comme Telegram ou des scripts d'automatisation).
-* **🖥️ Télémétrie CPU en Temps Réel** : Suivi des performances de votre ordinateur (fréquence CPU et température thermique calculée selon la charge réelle) directement intégré sous forme d'afficheurs analogiques virtuels futuristes.
-* **🔒 Sécurité Zero Trust** : Isolation du contexte Chromium activée (`contextIsolation`), interdiction de l'intégration directe de Node dans le renderer et vérification stricte des extensions de fichiers lors des opérations de lecture/écriture de fichiers partagés via IPC.
-
----
-
-## 🛠️ Stack Technique
-
-* **Framework Applicatif** : [Electron](https://www.electronjs.org/) (Zéro Trust)
-* **Frontend** : [React](https://react.dev/) + [Vite](https://vitejs.dev/) + [TypeScript](https://www.typescriptlang.org/)
-* **Moteur 3D** : [Three.js](https://threejs.org/) via [@react-three/fiber](https://github.com/pmndrs/react-three-fiber) et [@react-three/drei](https://github.com/pmndrs/drei)
-* **Serveur Webhook** : Node.js `http` (Port `7842`)
-
----
-
-## 🚀 Installation & Lancement en Développement
-
-### Prérequis
-* [Node.js](https://nodejs.org/) (Version 20 recommandée)
-* [Git](https://git-scm.com/)
-
-### Étapes d'installation
-1. **Cloner le dépôt** :
-   ```bash
-   git clone https://github.com/R0m1k3/EveFlow.git
-   cd EveFlow
-   ```
-2. **Installer les dépendances** :
-   ```bash
-   npm install
-   ```
-3. **Lancer l'application en mode développement** :
-   ```bash
-   npm start
-   ```
-   *Cette commande démarre le serveur de développement Vite à l'adresse `http://localhost:5173` puis lance Electron en mode connecté.*
+### Système
+* Télémétrie réelle : charge CPU, mémoire, fréquence, FPS, uptime.
+* Journal sur disque (`%APPDATA%/eveflow/eveflow.log`), icône de zone de notification, instance unique.
 
 ---
 
-## 📦 Compilation & Packaging (Production)
+## Stack
 
-Pour générer l'exécutable d'installation Windows (`.exe`) autonome :
+* Electron 44 (sandbox, contextIsolation, `webSecurity` actif, proxy HTTP en streaming dans le main process)
+* React 19 + Vite 8 + TypeScript 5.9 + Zustand
+* Canvas 2D, Web Audio (AudioWorklet, AnalyserNode)
+* Vitest pour les tests unitaires (SSE, VAD, WAV, normalisation d'événements Hermes)
 
-1. **Compiler le bundle frontend** :
-   ```bash
-   npm run build
-   ```
-2. **Générer le package d'installation Windows** :
-   ```bash
-   npm run dist
-   ```
-   *L'exécutable d'installation NSIS (`EveFlow Setup 1.0.8.exe`) et la build décompressée seront générés dans le dossier `./out/`.*
+```
+electron/        processus principal (fenêtre, tray, raccourcis, IPC, webhook, proxy HTTP)
+shared/          contrat IPC + normalisation des pushs webhook (main + renderer)
+src/lib          transport, SSE, persistance, utilitaires texte
+src/services     hermes/ (client, événements, outils locaux)  voice/ (capture, VAD, STT, TTS)
+src/state        stores Zustand (settings, chat, hermes, voice)
+src/components   hud/ chat/ panels/ settings/ compact/
+tests/           vitest
+```
 
 ---
 
-## 📜 Licence
+## Prérequis côté Hermes
 
-Ce projet est sous licence MIT. Consultez le fichier [LICENSE](LICENSE) pour plus de détails.
+Activez le serveur API dans la configuration Hermes (`~/.hermes/config.yaml`) ou via l'environnement :
+
+```
+API_SERVER_ENABLED=true
+API_SERVER_PORT=8642
+API_SERVER_KEY=<votre clé>
+```
+
+Puis lancez `hermes gateway`. Renseignez l'URL (`http://<hôte>:8642`) et la clé dans **Paramètres → Hermes** et cliquez **Tester la liaison**. Le transport choisi apparaît dans la barre supérieure.
+
+Pour recevoir les résultats de crons ou le miroir d'autres canaux dans EveFlow, faites pointer une livraison Hermes (script, webhook, `deliver`) vers `http://<ip-du-pc>:7842/eveflow/hook` avec un JSON tel que :
+
+```json
+{ "role": "assistant", "text": "Rapport terminé", "source": "telegram" }
+{ "event": "run.completed", "input": "question", "output": "réponse" }
+{ "event": "job.completed", "job": { "name": "Rapport" }, "output": "…", "status": "ok" }
+```
+
+---
+
+## Développement
+
+```bash
+npm install
+npm start          # Vite + Electron (rechargement à chaud du renderer)
+npm test           # tests unitaires
+npm run typecheck  # renderer + main process
+```
+
+Sans Electron, `npm run dev` puis `http://127.0.0.1:5173/` (ou `?mode=compact`) permet de travailler l'interface dans un navigateur ; les appels réseau passent alors directement par `fetch` (CORS requis côté serveur).
+
+## Packaging Windows
+
+```bash
+npm run dist
+```
+
+L'installateur NSIS est produit dans `out/`. Le workflow GitHub Actions construit l'exécutable sur chaque tag `v*`.
+
+---
+
+## Licence
+
+MIT.

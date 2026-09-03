@@ -1,0 +1,61 @@
+.compact-root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: 18px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(5, 12, 22, var(--compact-opacity, 0.92)), rgba(2, 6, 12, var(--compact-opacity, 0.92)));
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 30px rgba(var(--accent-rgb), 0.12);
+  backdrop-filter: blur(16px);
+}
+.compact-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 14px;
+  -webkit-app-region: drag;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  color: var(--ink-0);
+}
+.compact-head > * {
+  -webkit-app-region: no-drag;
+}
+.compact-head .title {
+  flex: 1;
+  -webkit-app-region: drag;
+}
+.compact-core {
+  position: relative;
+  height: 220px;
+  flex-shrink: 0;
+}
+.compact-core canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.compact-core .core-caption {
+  bottom: 6px;
+}
+.compact-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+.compact-body .command-bar {
+  padding: 8px 10px 10px;
+}
+.compact-body .command-input {
+  min-height: 40px;
+  font-size: 14px;
+  padding: 9px 12px;
+}
+.compact-body .bubble {
+  font-size: 13px;
+  padding: 8px 11px;
+}

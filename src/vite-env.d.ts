@@ -1,14 +1,49 @@
 /// <reference types="vite/client" />
 
-interface Window {
-  electronAPI?: {
-    windowControl: (action: 'minimize' | 'maximize' | 'close') => void;
-    setWindowMode: (mode: 'floating' | 'normal') => void;
-    setCockpitMode: (isOpen: boolean) => void;
-    onWindowModeChanged: (callback: (mode: 'floating' | 'normal') => void) => () => void;
-    onHermesPush: (callback: (event: any) => void) => () => void;
-    writeLog: (entry: any) => void;
-    storeGet: (key: string) => Promise<string | null>;
-    storeSet: (key: string, value: string) => Promise<boolean>;
-  };
+import type { EveFlowBridge } from '../shared/bridge';
+
+declare global {
+  interface Window {
+    eveflow?: EveFlowBridge;
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  }
+
+  interface SpeechRecognitionAlternative {
+    transcript: string;
+    confidence: number;
+  }
+  interface SpeechRecognitionResult {
+    readonly length: number;
+    readonly isFinal: boolean;
+    [index: number]: SpeechRecognitionAlternative;
+  }
+  interface SpeechRecognitionResultList {
+    readonly length: number;
+    [index: number]: SpeechRecognitionResult;
+  }
+  interface SpeechRecognitionEvent extends Event {
+    readonly resultIndex: number;
+    readonly results: SpeechRecognitionResultList;
+  }
+  interface SpeechRecognitionErrorEvent extends Event {
+    readonly error: string;
+    readonly message: string;
+  }
+  interface SpeechRecognition extends EventTarget {
+    lang: string;
+    continuous: boolean;
+    interimResults: boolean;
+    maxAlternatives: number;
+    onresult: ((event: SpeechRecognitionEvent) => void) | null;
+    onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+    onend: (() => void) | null;
+    onstart: (() => void) | null;
+    start(): void;
+    stop(): void;
+    abort(): void;
+  }
+  type SpeechRecognitionConstructor = new () => SpeechRecognition;
 }
+
+export {};
