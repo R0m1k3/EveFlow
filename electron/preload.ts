@@ -13,8 +13,8 @@ import {
   type WebhookStatus,
   type WindowMode
 } from '../shared/ipc';
-import type { EveFlowBridge, Unsubscribe } from '../shared/bridge';
-import { VOICE_IPC, type KwsDetection, type KwsStartRequest, type SynthesizeRequest, type SynthesizeResult, type TranscribeRequest, type TranscribeResult, type VoiceDownloadProgress, type VoiceEngineStatus, type VoiceModelStatus } from '../shared/voice';
+import type { EveFlowBridge, SystemAction, SystemActionResult, Unsubscribe } from '../shared/bridge';
+import { VOICE_IPC, type KwsDetection, type KwsStartRequest, type VadEvent, type VadStartRequest, type SynthesizeRequest, type SynthesizeResult, type TranscribeRequest, type TranscribeResult, type VoiceDownloadProgress, type VoiceEngineStatus, type VoiceModelStatus } from '../shared/voice';
 
 function subscribe<T>(channel: string, callback: (payload: T) => void): Unsubscribe {
   const listener = (_event: Electron.IpcRendererEvent, payload: T) => callback(payload);
@@ -43,7 +43,9 @@ const api: EveFlowBridge = {
   },
   system: {
     metrics: () => ipcRenderer.invoke(IPC.metrics) as Promise<SystemMetrics>,
-    appInfo: () => ipcRenderer.invoke(IPC.appInfo) as Promise<AppInfo>
+    appInfo: () => ipcRenderer.invoke(IPC.appInfo) as Promise<AppInfo>,
+    captureScreen: (maxWidth?: number) => ipcRenderer.invoke(IPC.screenCapture, maxWidth) as Promise<string>,
+    action: (action: SystemAction) => ipcRenderer.invoke(IPC.systemAction, action) as Promise<SystemActionResult>
   },
   files: {
     readLocal: (filePath: string) => ipcRenderer.invoke(IPC.readLocalFile, filePath) as Promise<string>,
@@ -73,7 +75,11 @@ const api: EveFlowBridge = {
     kwsStart: (req: KwsStartRequest) => ipcRenderer.invoke(VOICE_IPC.kwsStart, req) as Promise<{ accepted: string[]; rejected: string[] }>,
     kwsStop: () => ipcRenderer.invoke(VOICE_IPC.kwsStop) as Promise<void>,
     kwsAudio: (pcm: Uint8Array, sampleRate: number) => ipcRenderer.send(VOICE_IPC.kwsAudio, pcm, sampleRate),
-    onKwsDetected: (cb: (detection: KwsDetection) => void) => subscribe<KwsDetection>(VOICE_IPC.kwsDetected, cb)
+    onKwsDetected: (cb: (detection: KwsDetection) => void) => subscribe<KwsDetection>(VOICE_IPC.kwsDetected, cb),
+    vadStart: (req: VadStartRequest) => ipcRenderer.invoke(VOICE_IPC.vadStart, req) as Promise<void>,
+    vadStop: () => ipcRenderer.invoke(VOICE_IPC.vadStop) as Promise<void>,
+    vadAudio: (pcm: Uint8Array, sampleRate: number) => ipcRenderer.send(VOICE_IPC.vadAudio, pcm, sampleRate),
+    onVadEvent: (cb: (event: VadEvent) => void) => subscribe<VadEvent>(VOICE_IPC.vadEvent, cb)
   }
 };
 

@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron';
-import { VOICE_IPC, type KwsStartRequest, type SynthesizeRequest, type TranscribeRequest } from '../../shared/voice';
-import { engineStatus, kwsFeed, kwsStart, kwsStop, synthesize, transcribe, unload } from './engine';
+import { VOICE_IPC, type KwsStartRequest, type SynthesizeRequest, type TranscribeRequest, type VadStartRequest } from '../../shared/voice';
+import { engineStatus, kwsFeed, kwsStart, kwsStop, synthesize, transcribe, unload, vadFeed, vadStart, vadStop } from './engine';
 import { cancelDownload, downloadModel, listModels, removeModel } from './models';
 
 export function registerVoiceIpc(): void {
@@ -32,6 +32,15 @@ export function registerVoiceIpc(): void {
     return kwsStart({ ...req, keywords: req.keywords.filter((k) => typeof k === 'string'), sensitivity: Number(req.sensitivity) || 3 }, event.sender);
   });
   ipcMain.handle(VOICE_IPC.kwsStop, () => kwsStop());
+  ipcMain.handle(VOICE_IPC.vadStart, (event, req: VadStartRequest) => {
+    if (!req || typeof req.modelId !== 'string') throw new Error('Requête invalide');
+    return vadStart({ modelId: req.modelId, silenceMs: Number(req.silenceMs) || 700, threshold: Number(req.threshold) || 0.5, maxUtteranceSec: Number(req.maxUtteranceSec) || 30 }, event.sender);
+  });
+  ipcMain.handle(VOICE_IPC.vadStop, () => vadStop());
+  ipcMain.on(VOICE_IPC.vadAudio, (_e, pcm: unknown, sampleRate: unknown) => {
+    if (!(pcm instanceof Uint8Array) || pcm.byteLength === 0 || pcm.byteLength > 1024 * 1024) return;
+    vadFeed(pcm, typeof sampleRate === 'number' && sampleRate > 0 ? sampleRate : 16000);
+  });
   ipcMain.on(VOICE_IPC.kwsAudio, (_e, pcm: unknown, sampleRate: unknown) => {
     if (!(pcm instanceof Uint8Array) || pcm.byteLength === 0 || pcm.byteLength > 1024 * 1024) return;
     kwsFeed(pcm, typeof sampleRate === 'number' && sampleRate > 0 ? sampleRate : 16000);

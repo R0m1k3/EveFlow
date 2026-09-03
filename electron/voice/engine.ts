@@ -6,7 +6,7 @@ import { utilityProcess, type UtilityProcess, type WebContents } from 'electron'
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { VOICE_IPC, type KwsDetection, type KwsStartRequest, type SynthesizeRequest, type SynthesizeResult, type TranscribeRequest, type TranscribeResult, type VoiceEngineStatus } from '../../shared/voice';
+import { VOICE_IPC, type KwsDetection, type KwsStartRequest, type SynthesizeRequest, type SynthesizeResult, type TranscribeRequest, type TranscribeResult, type VadEvent, type VadStartRequest, type VoiceEngineStatus } from '../../shared/voice';
 import { buildKeywordsFile, parseTokens } from '../../shared/keywords';
 import { findModel } from './catalog';
 import { isInstalled, modelDir, modelsDir } from './models';
@@ -16,6 +16,8 @@ import { log } from '../logger';
 let kwsSubscriber: WebContents | null = null;
 let kwsActive = false;
 let kwsRequest: KwsStartRequest | null = null;
+let vadSubscriber: WebContents | null = null;
+let vadActive = false;
 
 interface Pending {
   resolve: (value: unknown) => void;
@@ -42,7 +44,20 @@ function spawn(): UtilityProcess {
   child = proc;
   proc.stdout?.on('data', (d: Buffer) => log('DEBUG', 'voice-worker', d.toString().trim()));
   proc.stderr?.on('data', (d: Buffer) => log('WARN', 'voice-worker', d.toString().trim()));
-  proc.on('message', (msg: { id?: number; type?: string; ok?: boolean; result?: unknown; error?: string; keyword?: string; at?: number }) => {
+  proc.on('message', (msg: { id?: number; type?: string; ok?: boolean; result?: unknown; error?: string; keyword?: string; at?: number; event?: { type: string; wav?: string; durationSec?: number } }) => {
+    if (msg.type === 'vad.event' && msg.event) {
+      if (vadSubscriber && !vadSubscriber.isDestroyed()) {
+        const ev = msg.event;
+        const payload: VadEvent =
+          ev.type === 'segment' && ev.wav
+            ? { type: 'segment', wav: new Uint8Array(Buffer.from(ev.wav, 'base64')), durationSec: ev.durationSec ?? 0 }
+            : ev.type === 'speech-start'
+              ? { type: 'speech-start' }
+              : { type: 'error', message: 'événement VAD inconnu' };
+        vadSubscriber.send(VOICE_IPC.vadEvent, payload);
+      }
+      return;
+    }
     if (msg.type === 'kws.detected') {
       if (kwsSubscriber && !kwsSubscriber.isDestroyed()) {
         kwsSubscriber.send(VOICE_IPC.kwsDetected, { keyword: msg.keyword ?? '', at: msg.at ?? Date.now() } satisfies KwsDetection);
@@ -177,6 +192,35 @@ export function kwsFeed(pcm: Uint8Array, sampleRate: number): void {
     proc.postMessage({ id: -1, type: 'kws.audio', pcm: b64, sampleRate });
   } catch (err) {
     log('WARN', 'voice', `kws feed failed: ${(err as Error).message}`);
+  }
+}
+
+/** Neural end-of-speech detection (Silero) on frames streamed by the renderer. */
+export async function vadStart(req: VadStartRequest, sender: WebContents): Promise<void> {
+  const spec = findModel(req.modelId);
+  if (!spec || spec.kind !== 'vad') throw new Error('Modèle VAD introuvable');
+  if (!isInstalled(spec)) throw new Error('Silero VAD non installé (Paramètres → Modèles locaux).');
+  vadSubscriber = sender;
+  await request(
+    { type: 'vad.start', model: { id: spec.id, engine: spec.engine, dir: modelDir(spec), files: spec.files }, silenceMs: req.silenceMs, threshold: req.threshold, maxUtteranceSec: req.maxUtteranceSec },
+    30_000
+  );
+  vadActive = true;
+}
+
+export async function vadStop(): Promise<void> {
+  vadActive = false;
+  vadSubscriber = null;
+  if (child) await request({ type: 'vad.stop' }, 10_000).catch(() => undefined);
+}
+
+export function vadFeed(pcm: Uint8Array, sampleRate: number): void {
+  if (!vadActive || !child) return;
+  const b64 = Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString('base64');
+  try {
+    child.postMessage({ id: -1, type: 'vad.audio', pcm: b64, sampleRate });
+  } catch (err) {
+    log('WARN', 'voice', `vad feed failed: ${(err as Error).message}`);
   }
 }
 

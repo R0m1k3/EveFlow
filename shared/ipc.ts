@@ -111,6 +111,8 @@ export const IPC = {
   httpStreamEvent: 'http:stream:event',
   metrics: 'system:metrics',
   appInfo: 'app:info',
+  screenCapture: 'system:screen-capture',
+  systemAction: 'system:action',
   readLocalFile: 'files:read-local',
   writeSharedFile: 'files:write-shared',
   openPath: 'files:open-path',

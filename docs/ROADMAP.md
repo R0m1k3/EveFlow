@@ -11,7 +11,9 @@
 | Synthèse vocale locale | Fait | Kokoro v1.0 (voix française Siwis) et Piper fr |
 | Mot d'activation permanent | Fait (2.2.0) | Keyword spotting sherpa-onnx en continu ; mot-clé libre encodé en BPE ; validé sur audio réel (détection, zéro faux positif sur le test anglais) |
 | Mot d'activation après transcription | Fait | Filtre « Jarvis … » en mains libres, tolérant aux erreurs de transcription |
-| Détection de fin de phrase | Fait | VAD énergétique adaptatif, pré-roll 400 ms |
+| Détection de fin de phrase | Fait (2.3.0) | Silero VAD neuronal dans le worker (segment renvoyé au renderer), repli sur le VAD énergétique si le modèle manque |
+| Vision d'écran | Fait (2.3.0) | Capture `desktopCapturer` jointe à la requête Hermes (bouton, ou « regarde mon écran ») |
+| Actions système locales | Fait (2.3.0) | Verrouillage, volume et touches média, ouvrir une application ou une URL, presse-papiers, recherche de fichiers ; intentions courtes exécutées sans passer par Hermes |
 | Hermes : runs, sessions, chat completions | Fait | Transport choisi selon `/v1/capabilities` |
 | Approbations, steer, stop | Fait | Modales, injection de consigne en cours de run |
 | Crons, skills, toolsets, sessions | Fait | Panneau Hermes Ops |
@@ -23,10 +25,10 @@
 Sources : [jarvis-desktop-ai](https://github.com/ccarloshenri/jarvis-desktop-ai), [JarvisAi](https://github.com/PanPenek/JarvisAi), [bertrandmbanwi/Jarvis](https://github.com/bertrandmbanwi/Jarvis), [InterGenJLU/jarvis](https://github.com/InterGenJLU/jarvis), [livekit-wakeword](https://livekit.com/blog/livekit-wakeword), [sherpa-onnx keyword spotting](https://k2-fsa.github.io/sherpa/onnx/kws/index.html), [Hermes Agent features](https://hermes-agent.nousresearch.com/docs/user-guide/features/overview).
 
 1. **Mot d'activation permanent, quasi gratuit en CPU.** Les projets de référence utilisent openWakeWord (« hey jarvis ») ou un modèle de keyword spotting qui écoute en continu, au lieu de transcrire chaque phrase. sherpa-onnx fournit un modèle KWS anglais de 3,3 Mo qui accepte n'importe quel mot-clé sans réentraînement ; « JARVIS » s'encode `▁JA R VI S` avec son modèle BPE (vérifié). Livré en 2.2.0 (voir l'étape 1 ci-dessous).
-2. **VAD neuronal (Silero) au lieu du seuil d'énergie.** Fin de phrase plus nette (environ 500 ms gagnés) et beaucoup moins de faux départs sur le bruit ambiant. Silero est déjà livré dans sherpa-onnx (`silero_vad.onnx`, 0,6 Mo).
+2. **VAD neuronal (Silero) au lieu du seuil d'énergie.** Fin de phrase plus nette (environ 500 ms gagnés) et beaucoup moins de faux départs sur le bruit ambiant. Silero est déjà livré dans sherpa-onnx (`silero_vad.onnx`, 0,6 Mo). Livré en 2.3.0.
 3. **Latence perçue sous la seconde.** Les références visent 1 s entre la fin de parole et le premier mot prononcé : STT rapide, premier token en streaming, TTS phrase par phrase (déjà en place), et un modèle Hermes rapide pour la conversation courante.
-4. **Vision d'écran.** Capture d'écran à la demande (« Jarvis, qu'est-ce que je regarde ? ») envoyée à Hermes comme image, ou lecture d'une fenêtre. Hermes accepte déjà les images inline.
-5. **Actions système locales.** Ouvrir une application, régler le volume, verrouiller la session, chercher un fichier ; ce sont des outils EveFlow côté client à exposer à Hermes (mode chat completions) ou un petit serveur MCP local que Hermes appelle.
+4. **Vision d'écran.** Capture d'écran à la demande (« Jarvis, qu'est-ce que je regarde ? ») envoyée à Hermes comme image, ou lecture d'une fenêtre. Hermes accepte déjà les images inline. Livré en 2.3.0 (transport chat completions pour les images).
+5. **Actions système locales.** Ouvrir une application, régler le volume, verrouiller la session, chercher un fichier. Livré en 2.3.0 sous forme d'intentions courtes exécutées localement avant Hermes ; reste à exposer les mêmes actions à Hermes via un serveur MCP local.
 6. **Proactivité.** Notifications parlées à l'arrivée d'un cron, rappel, événement webhook, avec un résumé plutôt que la lecture intégrale ; c'est en partie fait via le webhook, à enrichir avec des règles (heures calmes, priorité).
 7. **Mémoire et personnalisation.** Hermes gère la mémoire longue durée (`X-Hermes-Session-Key`) ; côté EveFlow, un profil (nom, préférences de voix, style de réponse) déjà transmis dans les instructions.
 
@@ -36,11 +38,13 @@ Sources : [jarvis-desktop-ai](https://github.com/ccarloshenri/jarvis-desktop-ai)
 - Le renderer garde un seul flux micro (AudioWorklet 16 kHz) et envoie des blocs de 256 ms au processus principal, qui alimente le `KeywordSpotter` sherpa-onnx dans le worker.
 - Mots-clés encodés en BPE (table SentencePiece pour les mots courants, repli glouton sur le vocabulaire du modèle), sensibilité réglable (seuil 0,45 → 0,12).
 - À la détection : chime, capture de la commande sur le même flux (VAD énergétique, pré-roll 400 ms), transcription locale ou API, envoi à Hermes ; retour automatique à l'écoute.
-- Reste à faire : remplacer le VAD énergétique par Silero pour la fin de phrase.
+- Fin de phrase Silero livrée en 2.3.0 : le renderer envoie des trames de 128 ms au worker pendant la commande, le worker renvoie le segment WAV complet ; VAD énergétique en repli.
 
-### Étape 2 : vision et actions locales
-- Outil `capture_screen` (Electron `desktopCapturer`) qui joint une capture à la requête Hermes.
-- Outils système : `open_app`, `set_volume`, `lock_session`, `find_file`, `clipboard` ; exposés en chat completions et via un serveur MCP local pour les transports runs/sessions.
+### Étape 2 : vision et actions locales — livrée en 2.3.0
+- Capture d'écran (`desktopCapturer`, JPEG 1600 px) jointe à la requête Hermes : bouton dans la barre de commande, ou phrase « regarde mon écran… » à l'oral comme à l'écrit.
+- Actions locales (processus principal, liste blanche) : verrouiller, volume/mute/lecture/piste, ouvrir une application connue ou une URL http(s), presse-papiers, recherche de fichiers dans Documents/Bureau/Téléchargements/Images.
+- Routeur d'intentions FR/EN (`src/services/localCommands.ts`) exécuté avant l'envoi à Hermes ; désactivable dans Paramètres → Micro. Les phrases composées (« ouvre X puis… ») partent à Hermes.
+- Reste à faire : exposer ces actions à Hermes lui-même (serveur MCP local) pour qu'un run puisse les enchaîner.
 
 ### Étape 3 : conversation plus naturelle
 - Barge-in réel : couper la voix dès que l'utilisateur parle (déjà préparé, à valider avec l'annulation d'écho Windows).
@@ -61,5 +65,8 @@ Sources : [jarvis-desktop-ai](https://github.com/ccarloshenri/jarvis-desktop-ai)
 | Kokoro (fr) → Whisper base, phrase courte de 2 s | synthèse 2,9 s, transcription 2,5 s, texte approximatif |
 | Kokoro (fr) → Whisper base, phrase de 7 s | transcription correcte à un mot près |
 | Piper (fr) → Whisper base | transcription exacte |
+| Silero VAD sur phrase Kokoro de 2,3 s (2.3.0) | un seul segment, début et fin détectés, 6,7 s d'audio traités en 190 ms |
+| Capture d'écran → Hermes (2.3.0) | JPEG de 107 ko reçu côté Hermes (mock chat completions) |
+| Intention locale « coupe le son » (2.3.0) | traitée sans Hermes, résultat affiché dans le fil |
 
 Sur un PC à 28 cœurs les temps sont nettement plus courts. Whisper small est maintenant recommandé pour le français.

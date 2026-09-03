@@ -1,7 +1,7 @@
 /** Local voice engine contract (sherpa-onnx in a utility process). Shared by main and renderer. */
 
-export type VoiceModelKind = 'stt' | 'tts' | 'kws';
-export type VoiceEngineKind = 'whisper' | 'sense-voice' | 'nemo-transducer' | 'kokoro' | 'piper' | 'kws-transducer';
+export type VoiceModelKind = 'stt' | 'tts' | 'kws' | 'vad';
+export type VoiceEngineKind = 'whisper' | 'sense-voice' | 'nemo-transducer' | 'kokoro' | 'piper' | 'kws-transducer' | 'silero';
 
 export interface VoiceSpeaker {
   id: number;
@@ -82,6 +82,20 @@ export interface KwsDetection {
   at: number;
 }
 
+export interface VadStartRequest {
+  modelId: string;
+  /** Silence that ends an utterance, in ms. */
+  silenceMs: number;
+  /** Detection threshold 0..1 (0.5 default). */
+  threshold: number;
+  maxUtteranceSec: number;
+}
+
+export type VadEvent =
+  | { type: 'speech-start' }
+  | { type: 'segment'; wav: Uint8Array; durationSec: number }
+  | { type: 'error'; message: string };
+
 export interface VoiceEngineStatus {
   available: boolean;
   error?: string;
@@ -103,5 +117,9 @@ export const VOICE_IPC = {
   kwsStart: 'voice:kws:start',
   kwsStop: 'voice:kws:stop',
   kwsAudio: 'voice:kws:audio',
-  kwsDetected: 'voice:kws:detected'
+  kwsDetected: 'voice:kws:detected',
+  vadStart: 'voice:vad:start',
+  vadStop: 'voice:vad:stop',
+  vadAudio: 'voice:vad:audio',
+  vadEvent: 'voice:vad:event'
 } as const;

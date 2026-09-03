@@ -9,6 +9,7 @@ import { Log } from '../../lib/log';
 import { audioBus } from './audioBus';
 import { DEFAULT_VAD, EnergyVad, type VadOptions } from './vad';
 import { buildWav16k, rms, type WavResult } from './wav';
+import type { VadEvent } from '../../../shared/voice';
 
 const WORKLET_SOURCE = `
 class EveFlowWakeProcessor extends AudioWorkletProcessor {
@@ -58,6 +59,11 @@ export class WakeListener {
   private callbacks: WakeCallbacks | null = null;
   private vadOptions: Partial<VadOptions> = {};
   private noSpeechTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Neural end-of-speech (Silero in the main process) instead of the energy VAD. */
+  private neural = false;
+  private unsubscribeVad: (() => void) | null = null;
+  private vadPending: Float32Array[] = [];
+  private vadPendingSamples = 0;
 
   get isActive(): boolean {
     return this.phase !== 'off';
@@ -67,10 +73,15 @@ export class WakeListener {
     return this.phase;
   }
 
-  async start(options: { deviceId?: string; vad?: Partial<VadOptions>; callbacks: WakeCallbacks }): Promise<void> {
+  async start(options: { deviceId?: string; vad?: Partial<VadOptions>; neuralVad?: boolean; callbacks: WakeCallbacks }): Promise<void> {
     if (this.phase !== 'off') return;
     this.callbacks = options.callbacks;
     this.vadOptions = options.vad ?? {};
+    this.neural = !!options.neuralVad;
+    if (this.neural) {
+      this.unsubscribeVad?.();
+      this.unsubscribeVad = bridge()?.voice.onVadEvent((event) => this.onVadEvent(event)) ?? null;
+    }
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         deviceId: options.deviceId ? { exact: options.deviceId } : undefined,
@@ -98,13 +109,34 @@ export class WakeListener {
     this.node.port.onmessage = (event: MessageEvent<Float32Array>) => this.onSamples(event.data);
     source.connect(this.node);
     this.setPhase('spotting');
-    Log.info('wake', `listener started (${this.sampleRate} Hz)`);
+    Log.info('wake', `listener started (${this.sampleRate} Hz, fin de phrase ${this.neural ? 'Silero' : 'énergie'})`);
+  }
+
+  private onVadEvent(event: VadEvent): void {
+    if (!this.neural || (this.phase !== 'command' && this.phase !== 'speech')) return;
+    if (event.type === 'speech-start') {
+      if (this.phase === 'command') {
+        this.setPhase('speech');
+        if (this.noSpeechTimer) clearTimeout(this.noSpeechTimer);
+        this.noSpeechTimer = null;
+      }
+    } else if (event.type === 'segment') {
+      const wav: WavResult = { bytes: event.wav, sampleRate: 16_000, durationSec: event.durationSec };
+      this.resumeSpotting();
+      if (wav.durationSec >= 0.25) this.callbacks?.onUtterance(wav);
+      else this.callbacks?.onNoSpeech();
+    } else if (event.type === 'error') {
+      this.callbacks?.onError(event.message);
+      this.resumeSpotting();
+    }
   }
 
   /** Called by the controller when the main process reports the wake word (or on manual trigger). */
   beginCommand(): void {
     if (this.phase === 'off' || this.phase === 'command' || this.phase === 'speech') return;
-    this.vad = new EnergyVad({ ...DEFAULT_VAD, ...this.vadOptions, noSpeechTimeoutMs: Number.POSITIVE_INFINITY });
+    this.vad = this.neural ? null : new EnergyVad({ ...DEFAULT_VAD, ...this.vadOptions, noSpeechTimeoutMs: Number.POSITIVE_INFINITY });
+    this.vadPending = [];
+    this.vadPendingSamples = 0;
     this.chunks = [];
     this.totalSamples = 0;
     this.setPhase('command');
@@ -126,6 +158,8 @@ export class WakeListener {
     if (this.phase === 'off') return;
     if (this.noSpeechTimer) clearTimeout(this.noSpeechTimer);
     this.noSpeechTimer = null;
+    this.unsubscribeVad?.();
+    this.unsubscribeVad = null;
     audioBus.setInputAnalyser(null);
     if (this.node) {
       this.node.port.onmessage = null;
@@ -139,6 +173,8 @@ export class WakeListener {
     this.chunks = [];
     this.pending = [];
     this.pendingSamples = 0;
+    this.vadPending = [];
+    this.vadPendingSamples = 0;
     this.setPhase('off');
     Log.info('wake', 'listener stopped');
   }
@@ -170,6 +206,14 @@ export class WakeListener {
       return;
     }
 
+    if (this.neural) {
+      // command / speech with Silero: stream ~128 ms frames to the main process, which returns the segment.
+      this.vadPending.push(samples);
+      this.vadPendingSamples += samples.length;
+      if (this.vadPendingSamples >= this.sampleRate * 0.128) this.flushToVad();
+      return;
+    }
+
     // command / speech: collect the utterance
     this.chunks.push(samples);
     this.totalSamples += samples.length;
@@ -196,21 +240,34 @@ export class WakeListener {
     }
   }
 
-  private flushToSpotter(): void {
-    const api = bridge();
-    if (!api) return;
-    const total = this.pendingSamples;
+  private static toInt16(chunks: Float32Array[], total: number): Uint8Array {
     const merged = new Int16Array(total);
     let offset = 0;
-    for (const chunk of this.pending) {
+    for (const chunk of chunks) {
       for (let i = 0; i < chunk.length; i++) {
         const s = Math.max(-1, Math.min(1, chunk[i]));
         merged[offset + i] = s < 0 ? s * 0x8000 : s * 0x7fff;
       }
       offset += chunk.length;
     }
+    return new Uint8Array(merged.buffer);
+  }
+
+  private flushToSpotter(): void {
+    const api = bridge();
+    if (!api) return;
+    const bytes = WakeListener.toInt16(this.pending, this.pendingSamples);
     this.pending = [];
     this.pendingSamples = 0;
-    api.voice.kwsAudio(new Uint8Array(merged.buffer), this.sampleRate);
+    api.voice.kwsAudio(bytes, this.sampleRate);
+  }
+
+  private flushToVad(): void {
+    const api = bridge();
+    if (!api) return;
+    const bytes = WakeListener.toInt16(this.vadPending, this.vadPendingSamples);
+    this.vadPending = [];
+    this.vadPendingSamples = 0;
+    api.voice.vadAudio(bytes, this.sampleRate);
   }
 }

@@ -22,6 +22,10 @@ export interface VoiceSettings extends SttConfig {
   /** off = push-to-talk / hands-free; transcript = filter after transcription; kws = always-on keyword spotting. */
   wakeMode: 'off' | 'transcript' | 'kws';
   kwsSensitivity: number; // 1..5
+  /** Use Silero VAD for end-of-speech in always-on mode when the model is installed. */
+  neuralVad: boolean;
+  /** Execute short system intents locally (lock, volume, open app…) instead of asking Hermes. */
+  localCommands: boolean;
 }
 
 export interface SpeechSettings extends TtsConfig {
@@ -88,6 +92,8 @@ export const DEFAULT_SETTINGS: Settings = {
     wakeWord: 'jarvis',
     wakeMode: 'off',
     kwsSensitivity: 3,
+    neuralVad: true,
+    localCommands: true,
     localModel: 'whisper-base'
   },
   speech: {

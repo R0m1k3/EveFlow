@@ -9,6 +9,7 @@ import { getSharedDirectory, registerFilesIpc } from './ipc/files';
 import { createMainWindow, getMainWindow, getWindowMode, setWindowMode, toggleWindowVisibility, windowEvents } from './window';
 import { getWebhookStatus, startWebhookServer, stopWebhookServer } from './webhook';
 import { registerVoiceIpc } from './voice/ipc';
+import { registerSystemIpc } from './ipc/system';
 import { stopEngine } from './voice/engine';
 
 // Audio playback must never be blocked behind a user gesture (TTS starts on incoming events).
@@ -159,6 +160,7 @@ async function boot(): Promise<void> {
   registerFilesIpc();
   registerCoreIpc();
   registerVoiceIpc();
+  registerSystemIpc();
   createMainWindow();
   createTray();
   registerShortcuts();
