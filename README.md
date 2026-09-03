@@ -96,13 +96,13 @@ npm run typecheck  # renderer + main process
 
 Sans Electron, `npm run dev` puis `http://127.0.0.1:5173/` (ou `?mode=compact`) permet de travailler l'interface dans un navigateur ; les appels réseau passent alors directement par `fetch` (CORS requis côté serveur).
 
-## Packaging Windows
+## Packaging Windows et versions
 
 ```bash
 npm run dist
 ```
 
-L'installateur NSIS est produit dans `out/`. Le workflow GitHub Actions construit l'exécutable sur chaque tag `v*`.
+L'installateur NSIS est produit dans `out/`. Le numéro de version publié est `releaseVersion` dans `package.json` (quatre chiffres, ex. `2.0.0.1` : le quatrième chiffre sert aux petits correctifs). `version` reste la base à trois chiffres exigée par electron-builder. À chaque fusion sur master, le workflow GitHub Actions crée le tag et la release Windows si ce numéro n'a pas encore été publié.
 
 ---
 

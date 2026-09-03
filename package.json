@@ -1,6 +1,7 @@
 {
   "name": "eveflow",
-  "version": "2.0.0.1",
+  "version": "2.0.0",
+  "releaseVersion": "2.0.0.1",
   "description": "JARVIS-style desktop HUD for Hermes Agent: voice, streaming runs, scheduled jobs, skills and telemetry",
   "main": "dist-electron/main.js",
   "private": true,
@@ -16,7 +17,7 @@
     "electron": "electron .",
     "start": "npm run build:electron && concurrently -k -s first \"npm run dev\" \"wait-on http://127.0.0.1:5173 && cross-env NODE_ENV=development VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
     "preview": "vite preview",
-    "dist": "npm run build && electron-builder --win --publish never",
+    "dist": "node scripts/dist.mjs",
     "typecheck:electron": "tsc -p tsconfig.electron.json --noEmit"
   },
   "build": {
