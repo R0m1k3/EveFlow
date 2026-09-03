@@ -1,31 +1,40 @@
 {
   "name": "eveflow",
-  "version": "1.0.8",
-  "description": "Retro-futuristic Windows companion with 3D Eve bot, local TTS/STT, and multi-agent connectivity",
-  "main": "main.js",
+  "version": "2.0.0",
+  "description": "JARVIS-style desktop HUD for Hermes Agent: voice, streaming runs, scheduled jobs, skills and telemetry",
+  "main": "dist-electron/electron/main.js",
+  "private": true,
+  "license": "MIT",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
+    "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "build": "npm run typecheck && npm run build:renderer && npm run build:electron",
+    "build:renderer": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "electron": "electron .",
-    "start": "concurrently -k \"npm run dev -- --host 127.0.0.1 --port 5173 --strictPort\" \"wait-on http://localhost:5173 && npm run electron\"",
-    "dist": "electron-builder --win"
+    "start": "npm run build:electron && concurrently -k -s first \"npm run dev\" \"wait-on http://127.0.0.1:5173 && cross-env NODE_ENV=development VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "preview": "vite preview",
+    "dist": "npm run build && electron-builder --win --publish never"
   },
   "build": {
     "appId": "com.romik3.eveflow",
     "productName": "EveFlow",
     "copyright": "Copyright © 2026 R0m1k3",
-    "asar": false,
+    "asar": true,
     "directories": {
-      "output": "out"
+      "output": "out",
+      "buildResources": "build"
     },
     "files": [
-      "main.js",
-      "preload.js",
-      "dist/**/*"
+      "dist-electron/**/*",
+      "dist/**/*",
+      "package.json"
     ],
     "win": {
       "target": "nsis",
+      "icon": "build/icon.png",
       "requestedExecutionLevel": "asInvoker",
       "signAndEditExecutable": false,
       "verifyUpdateCodeSignature": false
@@ -36,28 +45,35 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "EveFlow"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
+    ]
   },
   "dependencies": {
-    "@react-three/drei": "^9.105.0",
-    "@react-three/fiber": "^8.16.0",
-    "lucide-react": "^0.379.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "lucide-react": "^1.40.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "three": "^0.163.0"
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
-    "@types/react": "^18.3.1",
-    "@types/react-dom": "^18.3.1",
-    "@types/three": "^0.163.0",
-    "@vitejs/plugin-react": "^4.2.1",
-    "concurrently": "^8.2.2",
-    "electron": "^30.0.1",
-    "electron-builder": "^26.8.1",
-    "typescript": "^5.4.2",
-    "vite": "^5.2.2",
-    "wait-on": "^7.2.0"
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^10.0.5",
+    "cross-env": "^10.0.0",
+    "electron": "^44.1.1",
+    "electron-builder": "^26.15.3",
+    "jsdom": "^30.0.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0",
+    "wait-on": "^9.1.0"
   }
 }
