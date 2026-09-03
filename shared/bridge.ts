@@ -14,6 +14,8 @@ import type {
 import type {
   KwsDetection,
   KwsStartRequest,
+  VadEvent,
+  VadStartRequest,
   SynthesizeRequest,
   SynthesizeResult,
   TranscribeRequest,
@@ -46,10 +48,6 @@ export interface EveFlowBridge {
     streamAbort: (id: string) => void;
     onStreamEvent: (cb: (event: HttpStreamEvent) => void) => Unsubscribe;
   };
-  system: {
-    metrics: () => Promise<SystemMetrics>;
-    appInfo: () => Promise<AppInfo>;
-  };
   files: {
     readLocal: (filePath: string) => Promise<string>;
     writeShared: (filename: string, content: string, isBase64?: boolean) => Promise<{ path: string; url: string }>;
@@ -79,5 +77,32 @@ export interface EveFlowBridge {
     /** Fire-and-forget 16-bit PCM frames for the keyword spotter. */
     kwsAudio: (pcm: Uint8Array, sampleRate: number) => void;
     onKwsDetected: (cb: (detection: KwsDetection) => void) => Unsubscribe;
+    vadStart: (req: VadStartRequest) => Promise<void>;
+    vadStop: () => Promise<void>;
+    vadAudio: (pcm: Uint8Array, sampleRate: number) => void;
+    onVadEvent: (cb: (event: VadEvent) => void) => Unsubscribe;
   };
+  system: {
+    metrics: () => Promise<SystemMetrics>;
+    appInfo: () => Promise<AppInfo>;
+    /** Screenshot of the primary display as a JPEG data URL. */
+    captureScreen: (maxWidth?: number) => Promise<string>;
+    /** Allow-listed local actions (lock session, open app/url, media keys, clipboard). */
+    action: (action: SystemAction) => Promise<SystemActionResult>;
+  };
+}
+
+export type SystemAction =
+  | { type: 'lock' }
+  | { type: 'open-app'; name: string }
+  | { type: 'open-url'; url: string }
+  | { type: 'media'; key: 'volume-up' | 'volume-down' | 'mute' | 'play-pause' | 'next' | 'previous' }
+  | { type: 'clipboard-read' }
+  | { type: 'clipboard-write'; text: string }
+  | { type: 'find-files'; query: string };
+
+export interface SystemActionResult {
+  ok: boolean;
+  message?: string;
+  data?: unknown;
 }

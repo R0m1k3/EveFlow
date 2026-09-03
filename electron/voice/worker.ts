@@ -21,7 +21,10 @@ type Request =
   | { id: number; type: 'unload'; modelId?: string }
   | { id: number; type: 'kws.start'; model: ModelRef; keywordsFile: string; threshold: number; score: number }
   | { id: number; type: 'kws.audio'; pcm: string; sampleRate: number }
-  | { id: number; type: 'kws.stop' };
+  | { id: number; type: 'kws.stop' }
+  | { id: number; type: 'vad.start'; model: ModelRef; silenceMs: number; threshold: number; maxUtteranceSec: number }
+  | { id: number; type: 'vad.audio'; pcm: string; sampleRate: number }
+  | { id: number; type: 'vad.stop' };
 
 type Response = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: string };
 
@@ -31,6 +34,16 @@ type Sherpa = {
     createStream: () => { acceptWaveform: (w: { sampleRate: number; samples: Float32Array }) => void };
     decode: (s: unknown) => void;
     getResult: (s: unknown) => { text: string; lang?: string };
+  };
+  Vad: new (config: unknown, bufferSizeInSeconds: number) => {
+    acceptWaveform: (samples: Float32Array) => void;
+    isEmpty: () => boolean;
+    isDetected: () => boolean;
+    pop: () => void;
+    clear: () => void;
+    front: (enableExternalBuffer?: boolean) => { start: number; samples: Float32Array };
+    reset: () => void;
+    flush: () => void;
   };
   KeywordSpotter: new (config: unknown) => {
     createStream: () => KwsStream;
@@ -50,6 +63,7 @@ type Sherpa = {
 type KwsStream = { acceptWaveform: (w: { sampleRate: number; samples: Float32Array }) => void };
 let sherpa: Sherpa | null = null;
 let kws: { spotter: InstanceType<Sherpa['KeywordSpotter']>; stream: KwsStream } | null = null;
+let vad: { detector: InstanceType<Sherpa['Vad']>; speaking: boolean; windowSize: number; carry: Float32Array } | null = null;
 let notify: ((message: unknown) => void) | null = null;
 let loadError: string | null = null;
 
@@ -275,9 +289,74 @@ function feedKws(pcmBase64: string, sampleRate: number): void {
   }
 }
 
+function startVad(model: ModelRef, silenceMs: number, threshold: number, maxUtteranceSec: number): void {
+  const s = loadSherpa();
+  const windowSize = 512;
+  const detector = new s.Vad(
+    {
+      sileroVad: {
+        model: path.join(model.dir, 'silero_vad.onnx'),
+        threshold: Math.max(0.1, Math.min(0.95, threshold)),
+        minSilenceDuration: Math.max(0.15, silenceMs / 1000),
+        minSpeechDuration: 0.2,
+        windowSize,
+        maxSpeechDuration: Math.max(3, maxUtteranceSec)
+      },
+      sampleRate: 16000,
+      numThreads: 1,
+      provider: 'cpu',
+      debug: 0
+    },
+    Math.max(10, maxUtteranceSec + 5)
+  );
+  vad = { detector, speaking: false, windowSize, carry: new Float32Array(0) };
+}
+
+function feedVad(pcmBase64: string, sampleRate: number): void {
+  if (!vad) return;
+  const bytes = Buffer.from(pcmBase64, 'base64');
+  const int16 = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
+  let samples: Float32Array = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) samples[i] = int16[i] / 32768;
+  if (sampleRate !== 16000) samples = resampleTo16k(samples, sampleRate);
+  // Silero expects fixed windows: keep the remainder for the next frame.
+  const merged = new Float32Array(vad.carry.length + samples.length);
+  merged.set(vad.carry, 0);
+  merged.set(samples, vad.carry.length);
+  const usable = merged.length - (merged.length % vad.windowSize);
+  for (let i = 0; i < usable; i += vad.windowSize) {
+    vad.detector.acceptWaveform(merged.subarray(i, i + vad.windowSize));
+    const detected = vad.detector.isDetected();
+    if (detected && !vad.speaking) {
+      vad.speaking = true;
+      notify?.({ type: 'vad.event', event: { type: 'speech-start' } });
+    }
+    while (!vad.detector.isEmpty()) {
+      const segment = vad.detector.front(false);
+      vad.detector.pop();
+      vad.speaking = false;
+      const wav = encodeWav(segment.samples, 16000);
+      notify?.({
+        type: 'vad.event',
+        event: { type: 'segment', wav: Buffer.from(wav.buffer, wav.byteOffset, wav.byteLength).toString('base64'), durationSec: segment.samples.length / 16000 }
+      });
+    }
+  }
+  vad.carry = merged.slice(usable);
+}
+
 // ── request handling ───────────────────────────────────────────────────────
 function handle(req: Request): unknown {
   switch (req.type) {
+    case 'vad.start':
+      startVad(req.model, req.silenceMs, req.threshold, req.maxUtteranceSec);
+      return { ok: true };
+    case 'vad.audio':
+      feedVad(req.pcm, req.sampleRate);
+      return { ok: true };
+    case 'vad.stop':
+      vad = null;
+      return { ok: true };
     case 'kws.start':
       startKws(req.model, req.keywordsFile, req.threshold, req.score);
       return { ok: true };
@@ -331,6 +410,7 @@ function handle(req: Request): unknown {
         recognizers.clear();
         synthesizers.clear();
         kws = null;
+        vad = null;
       }
       return { ok: true };
     }

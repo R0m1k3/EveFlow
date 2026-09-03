@@ -113,8 +113,21 @@ class VoiceController {
       this.unsubscribeKws?.();
       this.unsubscribeKws = api.voice.onKwsDetected((d) => this.onWakeDetected(d.keyword));
       const sensitivity = Math.min(5, Math.max(1, Math.round(settings.sensitivity))) as 1 | 2 | 3 | 4 | 5;
+      let neuralVad = false;
+      if (settings.neuralVad) {
+        try {
+          const installed = (await api.voice.listModels()).some((m) => m.id === 'silero-vad' && m.installed);
+          if (installed) {
+            await api.voice.vadStart({ modelId: 'silero-vad', silenceMs: Math.max(300, Math.min(1500, settings.silenceMs - 200)), threshold: 0.5, maxUtteranceSec: 25 });
+            neuralVad = true;
+          }
+        } catch (err) {
+          Log.warn('voice', `silero unavailable, energy VAD fallback: ${(err as Error).message}`);
+        }
+      }
       await this.wake.start({
         deviceId: settings.micDeviceId || undefined,
+        neuralVad,
         vad: { silenceMs: settings.silenceMs, speechRatio: SENSITIVITY_RATIO[sensitivity], minRms: SENSITIVITY_MIN_RMS[sensitivity] },
         callbacks: {
           onPhase: (phase) => {
@@ -141,7 +154,8 @@ class VoiceController {
         }
       });
       voice.setWake('spotting', result.accepted.map((k) => k.replace(/_/g, ' ')));
-      Log.info('voice', `wake mode on: ${result.accepted.join(', ')}${result.rejected.length ? ` (rejetés : ${result.rejected.join(', ')})` : ''}`);
+      voice.setNeuralVad(neuralVad);
+      Log.info('voice', `wake mode on: ${result.accepted.join(', ')}${result.rejected.length ? ` (rejetés : ${result.rejected.join(', ')})` : ''}${neuralVad ? ' · Silero' : ''}`);
     } catch (err) {
       const message = (err as Error).message;
       voice.setWake('error');
@@ -149,6 +163,7 @@ class VoiceController {
       useChat.getState().setError(`Mot d’activation : ${message}`);
       Log.error('voice', `wake mode failed: ${message}`);
       await api.voice.kwsStop().catch(() => undefined);
+      await api.voice.vadStop().catch(() => undefined);
     }
   }
 
@@ -157,7 +172,10 @@ class VoiceController {
     this.unsubscribeKws = null;
     this.wake.stop();
     useVoice.getState().setWake('off');
-    await bridge()?.voice.kwsStop().catch(() => undefined);
+    useVoice.getState().setNeuralVad(false);
+    const api = bridge();
+    await api?.voice.kwsStop().catch(() => undefined);
+    await api?.voice.vadStop().catch(() => undefined);
   }
 
   /** Restart spotting with the current settings (wake word, sensitivity, microphone). */

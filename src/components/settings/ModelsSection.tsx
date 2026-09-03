@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Download, Trash2, X, CheckCircle2, Cpu, Mic, Volume2, AlertTriangle, RefreshCw, Ear } from 'lucide-react';
+import { Download, Trash2, X, CheckCircle2, Cpu, Mic, Volume2, AlertTriangle, RefreshCw, Ear, Activity } from 'lucide-react';
 import type { VoiceModelStatus } from '../../../shared/voice';
 import { bridge } from '../../lib/bridge';
 import { useShallow } from 'zustand/react/shallow';
@@ -23,9 +23,11 @@ function ModelRow({ model }: { model: VoiceModelStatus }) {
   const activate = () => {
     if (model.kind === 'stt') update({ voice: { localModel: model.id, provider: 'local' } });
     else if (model.kind === 'kws') update({ voice: { wakeMode: 'kws' } });
+    else if (model.kind === 'vad') update({ voice: { neuralVad: true } });
     else update({ speech: { localModel: model.id, provider: 'local', localSpeaker: model.speakers?.[0]?.id ?? 0 } });
   };
-  const activeNow = model.kind === 'kws' ? wakeMode === 'kws' : isActive;
+  const neuralVad = useSettings((s) => s.settings.voice.neuralVad);
+  const activeNow = model.kind === 'kws' ? wakeMode === 'kws' : model.kind === 'vad' ? neuralVad : isActive;
 
   return (
     <div className="row-item" style={activeNow && model.installed ? { borderColor: 'var(--accent)' } : undefined}>
@@ -76,6 +78,7 @@ export function ModelsSection() {
   const stt = models.filter((m) => m.kind === 'stt');
   const tts = models.filter((m) => m.kind === 'tts');
   const kws = models.filter((m) => m.kind === 'kws');
+  const vad = models.filter((m) => m.kind === 'vad');
   return (
     <>
       <div className="card">
@@ -98,6 +101,11 @@ export function ModelsSection() {
       <div className="card">
         <div className="section-title"><Ear size={12} /> Mot d’activation</div>
         <div className="list">{kws.map((m) => <ModelRow key={m.id} model={m} />)}</div>
+      </div>
+      <div className="card">
+        <div className="section-title"><Activity size={12} /> Fin de phrase</div>
+        <div className="list">{vad.map((m) => <ModelRow key={m.id} model={m} />)}</div>
+        <span className="hint" style={{ display: 'block', marginTop: 6 }}>Utilisé automatiquement en écoute permanente dès qu’il est installé ; sinon le VAD énergétique prend le relais.</span>
       </div>
       <div className="card">
         <div className="section-title"><Mic size={12} /> Reconnaissance vocale</div>

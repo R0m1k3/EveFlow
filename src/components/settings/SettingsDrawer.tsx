@@ -336,8 +336,12 @@ export function SettingsDrawer({ onClose }: Props) {
               </div>
             )}
             {settings.voice.wakeMode === 'kws' && (
-              <WakeStatus />
+              <>
+                <WakeStatus />
+                <Toggle on={settings.voice.neuralVad} onChange={(v) => update({ voice: { neuralVad: v } })} label="Fin de phrase neuronale (Silero)" hint="Coupe l’écoute au bon moment, même avec du bruit de fond. Nécessite le modèle Silero VAD (0,6 Mo) dans Modèles locaux." />
+              </>
             )}
+            <Toggle on={settings.voice.localCommands} onChange={(v) => update({ voice: { localCommands: v } })} label="Commandes locales instantanées" hint="« Verrouille la session », « monte le son », « ouvre Spotify », « regarde mon écran »… exécutées sur ce PC sans passer par Hermes." />
             <div className="row" style={{ marginTop: 10 }}>
               <button className="btn small" onClick={() => void testStt()} disabled={settings.voice.provider === 'browser'}><Mic size={13} /> Tester la reconnaissance</button>
             </div>

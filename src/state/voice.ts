@@ -15,6 +15,8 @@ interface VoiceStore {
   micDevices: Array<{ deviceId: string; label: string }>;
   wake: WakeState;
   wakeKeywords: string[];
+  neuralVad: boolean;
+  setNeuralVad: (on: boolean) => void;
   setWake: (state: WakeState, keywords?: string[]) => void;
   setPhase: (phase: ListenPhase) => void;
   setInputLevel: (level: number) => void;
@@ -37,6 +39,8 @@ export const useVoice = create<VoiceStore>((set) => ({
   micDevices: [],
   wake: 'off',
   wakeKeywords: [],
+  neuralVad: false,
+  setNeuralVad: (neuralVad) => set({ neuralVad }),
   setWake: (wake, wakeKeywords) => set(wakeKeywords ? { wake, wakeKeywords } : { wake }),
   setPhase: (phase) => set({ phase }),
   setInputLevel: (inputLevel) => set({ inputLevel }),

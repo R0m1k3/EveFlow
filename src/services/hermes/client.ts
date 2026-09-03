@@ -467,6 +467,8 @@ export class HermesClient {
         throw new HttpError(handle.start.status, detail);
       }
       ready = true;
+      // Chunks that raced ahead of the start event were buffered as potential error bodies: replay them.
+      for (const chunk of errorChunks.splice(0)) parser.feed(chunk);
       const rotated = handle.start.headers['x-hermes-session-id'];
       if (rotated && rotated !== options.sessionId) onEvent({ kind: 'session', sessionId: rotated });
 

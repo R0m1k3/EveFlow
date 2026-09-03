@@ -87,6 +87,19 @@ export const VOICE_CATALOG: VoiceModelSpec[] = [
     recommended: true
   },
   {
+    id: 'silero-vad',
+    kind: 'vad',
+    engine: 'silero',
+    name: 'Silero VAD (fin de phrase neuronale, 0,6 Mo)',
+    description: 'Détecte précisément le début et la fin de la parole pendant l’écoute permanente ; moins de faux départs sur le bruit.',
+    languages: ['multi'],
+    sizeMb: 1,
+    url: `${ASR}/silero_vad.onnx`,
+    dir: 'silero-vad',
+    files: ['silero_vad.onnx'],
+    recommended: true
+  },
+  {
     id: 'kokoro-v1',
     kind: 'tts',
     engine: 'kokoro',

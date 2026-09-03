@@ -12,6 +12,8 @@ import { useSettings } from '../state/settings';
 import { executeLocalTool, LOCAL_TOOL_DEFINITIONS } from './hermes/localTools';
 import type { HermesStreamEvent, SendHandle } from './hermes/types';
 import { speech } from './voice/speech';
+import { bridge } from '../lib/bridge';
+import { parseLocalIntent, runLocalIntent } from './localCommands';
 
 let active: SendHandle | null = null;
 let activeMessageId: string | null = null;
@@ -165,9 +167,49 @@ function addPending(request: Omit<PendingRequest, 'id' | 'createdAt'>): void {
   speech.say(request.kind === 'approval' ? 'Autorisation requise.' : request.kind === 'clarify' ? request.description : 'Saisie requise.', { interrupt: false });
 }
 
+/** Screenshot of the primary display as a data URL (Electron only). */
+export async function captureScreen(): Promise<string | null> {
+  const api = bridge();
+  if (!api) return null;
+  try {
+    return await api.system.captureScreen(1600);
+  } catch (err) {
+    useChat.getState().setError(`Capture d’écran : ${(err as Error).message}`);
+    return null;
+  }
+}
+
+/** Short system intents handled on the machine without a Hermes round trip. Returns true when consumed. */
+async function tryLocalIntent(text: string, source: string): Promise<{ handled: boolean; images?: string[]; text?: string }> {
+  const settings = useSettings.getState().settings;
+  if (!settings.voice.localCommands || !bridge()) return { handled: false };
+  const intent = parseLocalIntent(text);
+  if (!intent) return { handled: false };
+  if (intent.kind === 'screenshot') {
+    const shot = await captureScreen();
+    if (!shot) return { handled: false };
+    return { handled: false, images: [shot], text: intent.question || text };
+  }
+  const chat = useChat.getState();
+  chat.addMessage({ role: 'user', content: text, source, status: 'done' });
+  const result = await runLocalIntent(intent);
+  chat.addMessage({ role: 'assistant', content: result.message, source: 'local', status: result.ok ? 'done' : 'error' });
+  chat.setHud(result.ok ? 'idle' : 'error');
+  if (settings.speech.autoSpeak) speech.say(result.message, { interrupt: true });
+  return { handled: true };
+}
+
 export async function sendMessage(text: string, images: string[] = [], source = 'eveflow'): Promise<void> {
-  const trimmed = text.trim();
+  let trimmed = text.trim();
   if ((!trimmed && images.length === 0) || active) return;
+  if (trimmed && images.length === 0) {
+    const local = await tryLocalIntent(trimmed, source);
+    if (local.handled) return;
+    if (local.images) {
+      images = local.images;
+      trimmed = (local.text ?? trimmed).trim();
+    }
+  }
   const chat = useChat.getState();
   const hermes = useHermes.getState();
   const settings = useSettings.getState().settings;

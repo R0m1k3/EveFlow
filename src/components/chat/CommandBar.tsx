@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Mic, Paperclip, Send, Square, X, Radio, Loader2, Volume2, VolumeX, Navigation } from 'lucide-react';
-import { sendMessage, steer, stopGeneration } from '../../services/conversation';
+import { Mic, Paperclip, Send, Square, X, Radio, Loader2, Volume2, VolumeX, Navigation, ScanEye } from 'lucide-react';
+import { sendMessage, steer, stopGeneration , captureScreen } from '../../services/conversation';
 import { speech } from '../../services/voice/speech';
 import { voiceController } from '../../services/voice/voiceController';
 import { useChat } from '../../state/chat';
@@ -167,9 +167,20 @@ export function CommandBar({ compact }: Props) {
           spellCheck={false}
         />
         {!compact && (
-          <button className="icon-btn" title="Joindre une image" onClick={() => fileRef.current?.click()} style={{ height: 46, width: 40 }}>
-            <Paperclip size={18} />
-          </button>
+          <>
+            <button
+              className="icon-btn"
+              title="Joindre une capture de l’écran (Hermes la voit)"
+              aria-label="Capturer l’écran"
+              onClick={() => void captureScreen().then((shot) => { if (shot) setImages((prev) => [...prev, shot].slice(-4)); })}
+              style={{ height: 46, width: 40 }}
+            >
+              <ScanEye size={18} />
+            </button>
+            <button className="icon-btn" title="Joindre une image" onClick={() => fileRef.current?.click()} style={{ height: 46, width: 40 }}>
+              <Paperclip size={18} />
+            </button>
+          </>
         )}
         <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => void onFiles(e.target.files)} />
         {isSending && !steerMode ? (
