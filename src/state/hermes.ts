@@ -91,7 +91,12 @@ export const useHermes = create<HermesStore>((set, get) => ({
   webhook: null,
   busy: false,
 
-  client: () => new HermesClient(useSettings.getState().settings.hermes),
+  client: () => {
+    const config = useSettings.getState().settings.hermes;
+    // Without an explicit model, use the alias advertised by /v1/models (Hermes rejects unknown names).
+    const model = config.model.trim() || get().models[0]?.id || '';
+    return new HermesClient({ ...config, model });
+  },
 
   connect: async () => {
     const config = useSettings.getState().settings.hermes;
