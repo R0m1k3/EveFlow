@@ -14,6 +14,7 @@ import {
   type WindowMode
 } from '../shared/ipc';
 import type { EveFlowBridge, Unsubscribe } from '../shared/bridge';
+import { VOICE_IPC, type SynthesizeRequest, type SynthesizeResult, type TranscribeRequest, type TranscribeResult, type VoiceDownloadProgress, type VoiceEngineStatus, type VoiceModelStatus } from '../shared/voice';
 
 function subscribe<T>(channel: string, callback: (payload: T) => void): Unsubscribe {
   const listener = (_event: Electron.IpcRendererEvent, payload: T) => callback(payload);
@@ -57,6 +58,17 @@ const api: EveFlowBridge = {
   },
   hotkeys: {
     on: (cb: (event: HotkeyEvent) => void) => subscribe<HotkeyEvent>(IPC.hotkey, cb)
+  },
+  voice: {
+    status: () => ipcRenderer.invoke(VOICE_IPC.status) as Promise<VoiceEngineStatus>,
+    listModels: () => ipcRenderer.invoke(VOICE_IPC.modelsList) as Promise<VoiceModelStatus[]>,
+    downloadModel: (id: string) => ipcRenderer.invoke(VOICE_IPC.modelsDownload, id) as Promise<VoiceModelStatus>,
+    cancelDownload: (id: string) => ipcRenderer.invoke(VOICE_IPC.modelsCancel, id) as Promise<boolean>,
+    removeModel: (id: string) => ipcRenderer.invoke(VOICE_IPC.modelsRemove, id) as Promise<VoiceModelStatus[]>,
+    onProgress: (cb: (progress: VoiceDownloadProgress) => void) => subscribe<VoiceDownloadProgress>(VOICE_IPC.modelsProgress, cb),
+    transcribe: (req: TranscribeRequest) => ipcRenderer.invoke(VOICE_IPC.transcribe, req) as Promise<TranscribeResult>,
+    synthesize: (req: SynthesizeRequest) => ipcRenderer.invoke(VOICE_IPC.synthesize, req) as Promise<SynthesizeResult>,
+    unload: (id?: string) => ipcRenderer.invoke(VOICE_IPC.unload, id) as Promise<unknown>
   }
 };
 

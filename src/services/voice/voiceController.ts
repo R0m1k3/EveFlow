@@ -15,8 +15,39 @@ import type { WavResult } from './wav';
 const SENSITIVITY_RATIO: Record<number, number> = { 1: 4.5, 2: 3.4, 3: 2.6, 4: 2.0, 5: 1.6 };
 const SENSITIVITY_MIN_RMS: Record<number, number> = { 1: 0.03, 2: 0.02, 3: 0.012, 4: 0.008, 5: 0.005 };
 
+/** Levenshtein distance, used to tolerate transcription slips in the wake word ("javis" for "jarvis"). */
+function editDistance(a: string, b: string): number {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...new Array<number>(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+/** Compare the start of an utterance with the wake word, tolerant to accents, case, punctuation and small slips. */
+export function matchWakeWord(text: string, wakeWord: string): { matched: boolean; rest: string } {
+  const norm = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const target = norm(wakeWord).split(/[\s\p{P}]+/u).filter(Boolean);
+  if (target.length === 0) return { matched: true, rest: text.trim() };
+  const original = text.trim().replace(/^[\s\p{P}]+/u, '');
+  const words = original.split(/\s+/);
+  const head = words.slice(0, target.length).map((w) => norm(w).replace(/[\p{P}]+/gu, ''));
+  if (head.length < target.length) return { matched: false, rest: '' };
+  const joinedHead = head.join(' ');
+  const joinedTarget = target.join(' ');
+  const tolerance = joinedTarget.length >= 6 ? 2 : joinedTarget.length >= 4 ? 1 : 0;
+  if (editDistance(joinedHead, joinedTarget) > tolerance) return { matched: false, rest: '' };
+  const rest = words.slice(target.length).join(' ').replace(/^[\s\p{P}]+/u, '');
+  return { matched: true, rest };
+}
+
 class VoiceController {
   private capture = new MicCapture();
+  /** After a bare wake word, the next utterance is accepted without the wake word. */
+  private attentionUntil = 0;
   private browser = new BrowserRecognizer();
   private handsFreeTimer: ReturnType<typeof setTimeout> | null = null;
   private stopping = false;
@@ -169,10 +200,28 @@ class VoiceController {
     this.playChime(false);
     const settings = useSettings.getState().settings.voice;
     try {
-      const text = await transcribeWav(wav.bytes, settings);
+      let text = await transcribeWav(wav.bytes, settings);
       voice.setTranscript(text);
       voice.setPhase('off');
       Log.info('voice', `transcript (${wav.durationSec.toFixed(1)}s): ${text}`);
+      if (voice.handsFree && settings.wakeWordEnabled && Date.now() > this.attentionUntil) {
+        const { matched, rest } = matchWakeWord(text, settings.wakeWord || 'jarvis');
+        if (!matched) {
+          Log.debug('voice', 'utterance ignored: no wake word');
+          voice.setTranscript('');
+          useChat.getState().setHud('idle');
+          this.scheduleHandsFree(200);
+          return;
+        }
+        if (!rest.trim()) {
+          this.attentionUntil = Date.now() + 10_000;
+          useChat.getState().setHud('listening');
+          speech.say('Oui ?');
+          return;
+        }
+        text = rest;
+      }
+      this.attentionUntil = 0;
       if (text.trim()) {
         await sendMessage(text, [], 'voice');
       } else {

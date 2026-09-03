@@ -1,7 +1,7 @@
 {
   "name": "eveflow",
-  "version": "2.0.0",
-  "releaseVersion": "2.0.0.1",
+  "version": "2.1.0",
+  "releaseVersion": "2.1.0",
   "description": "JARVIS-style desktop HUD for Hermes Agent: voice, streaming runs, scheduled jobs, skills and telemetry",
   "main": "dist-electron/main.js",
   "private": true,
@@ -53,6 +53,14 @@
         "from": "build/icon.png",
         "to": "icon.png"
       }
+    ],
+    "asarUnpack": [
+      "dist-electron/voice-worker.js",
+      "node_modules/sherpa-onnx-node/**",
+      "node_modules/sherpa-onnx-win-x64/**",
+      "node_modules/sherpa-onnx-linux-x64/**",
+      "node_modules/sherpa-onnx-darwin-arm64/**",
+      "node_modules/sherpa-onnx-darwin-x64/**"
     ]
   },
   "dependencies": {
@@ -61,12 +69,14 @@
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "sherpa-onnx-node": "^1.13.7",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.0",
+    "@types/unbzip2-stream": "^1.4.3",
     "@vitejs/plugin-react": "^6.1.1",
     "concurrently": "^10.0.5",
     "cross-env": "^10.0.0",
@@ -74,7 +84,9 @@
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
     "jsdom": "^30.0.1",
+    "tar": "^7.5.22",
     "typescript": "^5.9.3",
+    "unbzip2-stream": "^1.4.3",
     "vite": "^8.2.2",
     "vitest": "^5.0.0",
     "wait-on": "^9.1.0"

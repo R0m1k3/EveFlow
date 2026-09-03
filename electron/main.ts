@@ -8,6 +8,8 @@ import { registerTelemetryIpc } from './ipc/telemetry';
 import { getSharedDirectory, registerFilesIpc } from './ipc/files';
 import { createMainWindow, getMainWindow, getWindowMode, setWindowMode, toggleWindowVisibility } from './window';
 import { getWebhookStatus, startWebhookServer, stopWebhookServer } from './webhook';
+import { registerVoiceIpc } from './voice/ipc';
+import { stopEngine } from './voice/engine';
 
 // Audio playback must never be blocked behind a user gesture (TTS starts on incoming events).
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -149,6 +151,7 @@ app.whenReady().then(async () => {
   registerTelemetryIpc();
   registerFilesIpc();
   registerCoreIpc();
+  registerVoiceIpc();
   createMainWindow();
   createTray();
   registerShortcuts();
@@ -162,6 +165,7 @@ app.whenReady().then(async () => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   abortAllStreams();
+  stopEngine();
   void stopWebhookServer();
 });
 

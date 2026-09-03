@@ -11,6 +11,15 @@ import type {
   WebhookStatus,
   WindowMode
 } from './ipc';
+import type {
+  SynthesizeRequest,
+  SynthesizeResult,
+  TranscribeRequest,
+  TranscribeResult,
+  VoiceDownloadProgress,
+  VoiceEngineStatus,
+  VoiceModelStatus
+} from './voice';
 
 export type Unsubscribe = () => void;
 
@@ -50,5 +59,16 @@ export interface EveFlowBridge {
   };
   hotkeys: {
     on: (cb: (event: HotkeyEvent) => void) => Unsubscribe;
+  };
+  voice: {
+    status: () => Promise<VoiceEngineStatus>;
+    listModels: () => Promise<VoiceModelStatus[]>;
+    downloadModel: (id: string) => Promise<VoiceModelStatus>;
+    cancelDownload: (id: string) => Promise<boolean>;
+    removeModel: (id: string) => Promise<VoiceModelStatus[]>;
+    onProgress: (cb: (progress: VoiceDownloadProgress) => void) => Unsubscribe;
+    transcribe: (req: TranscribeRequest) => Promise<TranscribeResult>;
+    synthesize: (req: SynthesizeRequest) => Promise<SynthesizeResult>;
+    unload: (id?: string) => Promise<unknown>;
   };
 }
