@@ -43,7 +43,7 @@ interface HermesStore {
   webhook: WebhookStatus | null;
   busy: boolean;
 
-  client: () => HermesClient;
+  client: (modelOverride?: string) => HermesClient;
   connect: () => Promise<void>;
   refreshJobs: () => Promise<void>;
   refreshSessions: () => Promise<void>;
@@ -93,10 +93,10 @@ export const useHermes = create<HermesStore>((set, get) => ({
   webhook: null,
   busy: false,
 
-  client: () => {
+  client: (modelOverride) => {
     const config = useSettings.getState().settings.hermes;
     // Without an explicit model, use the alias advertised by /v1/models (Hermes rejects unknown names).
-    const model = config.model.trim() || get().models[0]?.id || '';
+    const model = (modelOverride ?? '').trim() || config.model.trim() || get().models[0]?.id || '';
     return new HermesClient({ ...config, model });
   },
 

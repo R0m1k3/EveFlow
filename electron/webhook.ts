@@ -8,6 +8,7 @@ import type { BrowserWindow } from 'electron';
 import { IPC, type WebhookStatus } from '../shared/ipc';
 import { normalizeHermesPush } from '../shared/hermesPush';
 import { log } from './logger';
+import { handleMcpHttp, MCP_PATH } from './mcp';
 
 export const WEBHOOK_PATH = '/eveflow/hook';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -57,9 +58,10 @@ export async function startWebhookServer(getWindow: () => BrowserWindow | null, 
     };
 
     if (req.method === 'GET' && (req.url === '/health' || req.url === '/')) {
-      return json(200, { ok: true, app: 'eveflow', path: WEBHOOK_PATH });
+      return json(200, { ok: true, app: 'eveflow', path: WEBHOOK_PATH, mcp: MCP_PATH });
     }
-    if (req.method !== 'POST' || !req.url?.startsWith(WEBHOOK_PATH)) {
+    const isMcp = !!req.url && (req.url === MCP_PATH || req.url.startsWith(`${MCP_PATH}?`));
+    if (!isMcp && (req.method !== 'POST' || !req.url?.startsWith(WEBHOOK_PATH))) {
       return json(404, { error: 'Not Found' });
     }
 
@@ -91,6 +93,13 @@ export async function startWebhookServer(getWindow: () => BrowserWindow | null, 
       if (tooLarge) return;
       // Concatenate before decoding so multibyte UTF-8 (accents, emoji) split across chunks stays intact.
       const body = Buffer.concat(chunks).toString('utf8');
+      if (isMcp) {
+        handleMcpHttp(getWindow(), req, res, body).catch((err: Error) => {
+          log('ERROR', 'mcp', err.message);
+          if (!res.headersSent) json(500, { error: err.message });
+        });
+        return;
+      }
       try {
         const raw: unknown = body.trim() ? JSON.parse(body) : {};
         const events = normalizeHermesPush(raw);

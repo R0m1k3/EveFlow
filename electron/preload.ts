@@ -14,6 +14,7 @@ import {
   type WindowMode
 } from '../shared/ipc';
 import type { EveFlowBridge, SystemAction, SystemActionResult, Unsubscribe } from '../shared/bridge';
+import type { McpToolRequest, McpToolResponse } from '../shared/ipc';
 import { VOICE_IPC, type KwsDetection, type KwsStartRequest, type VadEvent, type VadStartRequest, type SynthesizeRequest, type SynthesizeResult, type TranscribeRequest, type TranscribeResult, type VoiceDownloadProgress, type VoiceEngineStatus, type VoiceModelStatus } from '../shared/voice';
 
 function subscribe<T>(channel: string, callback: (payload: T) => void): Unsubscribe {
@@ -57,6 +58,8 @@ const api: EveFlowBridge = {
   hermes: {
     onPush: (cb: (event: HermesPushEvent) => void) => subscribe<HermesPushEvent>(IPC.hermesPush, cb),
     webhookStatus: () => ipcRenderer.invoke(IPC.webhookStatus) as Promise<WebhookStatus>,
+    onToolRequest: (cb: (req: McpToolRequest) => void) => subscribe<McpToolRequest>(IPC.mcpRequest, cb),
+    toolResponse: (res: McpToolResponse) => ipcRenderer.send(IPC.mcpResponse, res),
     webhookRestart: () => ipcRenderer.invoke(IPC.webhookRestart) as Promise<WebhookStatus>
   },
   hotkeys: {

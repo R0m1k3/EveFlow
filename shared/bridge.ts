@@ -11,6 +11,7 @@ import type {
   WebhookStatus,
   WindowMode
 } from './ipc';
+import type { McpToolRequest, McpToolResponse } from './ipc';
 import type {
   KwsDetection,
   KwsStartRequest,
@@ -57,6 +58,9 @@ export interface EveFlowBridge {
   hermes: {
     onPush: (cb: (event: HermesPushEvent) => void) => Unsubscribe;
     webhookStatus: () => Promise<WebhookStatus>;
+    /** Tool calls from Hermes via the local MCP endpoint that need the renderer. */
+    onToolRequest: (cb: (req: McpToolRequest) => void) => Unsubscribe;
+    toolResponse: (res: McpToolResponse) => void;
     webhookRestart: () => Promise<WebhookStatus>;
   };
   hotkeys: {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Mic, Paperclip, Send, Square, X, Radio, Loader2, Volume2, VolumeX, Navigation, ScanEye } from 'lucide-react';
+import { Mic, Paperclip, Send, Square, X, Radio, Loader2, Volume2, VolumeX, Navigation, ScanEye, Crosshair } from 'lucide-react';
 import { sendMessage, steer, stopGeneration , captureScreen } from '../../services/conversation';
 import { speech } from '../../services/voice/speech';
 import { voiceController } from '../../services/voice/voiceController';
@@ -50,6 +50,8 @@ export function CommandBar({ compact }: Props) {
   const autoSpeak = useSettings((s) => s.settings.speech.autoSpeak);
   const update = useSettings((s) => s.update);
   const [images, setImages] = useState<string[]>([]);
+  const missionMode = useChat((s) => s.missionMode);
+  const missionModel = useSettings((s) => s.settings.hermes.missionModel);
   const [steerMode, setSteerMode] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -197,6 +199,9 @@ export function CommandBar({ compact }: Props) {
         <div className="command-foot">
           <button className={`toggle-btn${handsFree ? ' on' : ''}`} onClick={() => voiceController.setHandsFree(!handsFree)} title="Écoute continue : le micro se réactive après chaque réponse">
             <Radio size={12} /> mains libres
+          </button>
+          <button className={`toggle-btn${missionMode ? ' on' : ''}`} onClick={() => useChat.getState().setMissionMode(!missionMode)} title={missionModel ? `Mode mission : modèle ${missionModel} pour les tâches longues` : 'Mode mission (définissez un modèle « mission » dans Paramètres → Hermes)'}>
+            <Crosshair size={14} /> Mission
           </button>
           <button className={`toggle-btn${autoSpeak && speechProvider !== 'off' ? ' on' : ''}`} onClick={() => update({ speech: { autoSpeak: !autoSpeak } })} title="Lire les réponses à voix haute">
             {autoSpeak && speechProvider !== 'off' ? <Volume2 size={12} /> : <VolumeX size={12} />} voix

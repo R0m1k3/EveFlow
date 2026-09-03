@@ -113,6 +113,8 @@ export const IPC = {
   appInfo: 'app:info',
   screenCapture: 'system:screen-capture',
   systemAction: 'system:action',
+  mcpRequest: 'mcp:request',
+  mcpResponse: 'mcp:response',
   readLocalFile: 'files:read-local',
   writeSharedFile: 'files:write-shared',
   openPath: 'files:open-path',
@@ -124,3 +126,17 @@ export const IPC = {
 } as const;
 
 export type HotkeyEvent = 'ptt-toggle' | 'toggle-window' | 'stop-speaking';
+
+/** A tool call arriving from Hermes through the local MCP endpoint that needs the renderer (UI, voice, chat). */
+export interface McpToolRequest {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+}
+
+export interface McpToolResponse {
+  id: string;
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+}
