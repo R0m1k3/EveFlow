@@ -33,6 +33,33 @@ function Toggle({ on, onChange, label, hint }: { on: boolean; onChange: (v: bool
 
 type TestState = { status: 'idle' | 'running' | 'ok' | 'fail'; message: string };
 
+function WakeStatus() {
+  const wake = useVoice((s) => s.wake);
+  const keywords = useVoice((s) => s.wakeKeywords);
+  const error = useVoice((s) => s.error);
+  const models = useVoiceModels((s) => s.models);
+  const download = useVoiceModels((s) => s.download);
+  const progress = useVoiceModels((s) => s.progress['kws-en']);
+  const installed = models.find((m) => m.id === 'kws-en')?.installed;
+  if (installed === false) {
+    return (
+      <div className="test-result fail" style={{ marginTop: 8 }}>
+        <XCircle size={13} />
+        <span>Détecteur non installé.</span>
+        <button className="btn small primary" style={{ marginLeft: 'auto' }} disabled={!!progress} onClick={() => void download('kws-en')}>
+          {progress ? `${progress.percent}%` : 'Télécharger (4 Mo)'}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className={`test-result ${wake === 'spotting' ? 'ok' : wake === 'error' ? 'fail' : ''}`} style={{ marginTop: 8 }}>
+      {wake === 'spotting' ? <CheckCircle2 size={13} /> : wake === 'error' ? <XCircle size={13} /> : <Loader2 size={13} className="spin" />}
+      <span>{wake === 'spotting' ? `à l’écoute de « ${keywords.join(' », « ')} »` : wake === 'error' ? error ?? 'erreur' : 'démarrage…'}</span>
+    </div>
+  );
+}
+
 function TestResult({ t }: { t: TestState }) {
   if (t.status === 'idle') return null;
   return (
@@ -278,12 +305,38 @@ export function SettingsDrawer({ onClose }: Props) {
             </div>
             <Toggle on={settings.voice.handsFree} onChange={(v) => { update({ voice: { handsFree: v } }); useVoice.getState().setHandsFree(v); }} label="Mains libres au démarrage" hint="Le micro se réactive automatiquement après chaque réponse." />
             <Toggle on={settings.voice.wakeChime} onChange={(v) => update({ voice: { wakeChime: v } })} label="Signal sonore d’écoute" />
-            <Toggle on={settings.voice.wakeWordEnabled} onChange={(v) => update({ voice: { wakeWordEnabled: v } })} label="Mot d’activation en mains libres" hint="Seules les phrases commençant par ce mot sont envoyées à Hermes ; le reste est ignoré. Recommandé avec la reconnaissance locale." />
-            {settings.voice.wakeWordEnabled && (
-              <div className="field" style={{ marginTop: 8 }}>
-                <label>Mot d’activation</label>
-                <input className="input" value={settings.voice.wakeWord} placeholder="jarvis" onChange={(e) => update({ voice: { wakeWord: e.target.value.toLowerCase() } })} />
+            <div className="field" style={{ marginTop: 10 }}>
+              <label>Mot d’activation</label>
+              <select className="select" value={settings.voice.wakeMode} onChange={(e) => update({ voice: { wakeMode: e.target.value as typeof settings.voice.wakeMode, wakeWordEnabled: e.target.value === 'transcript' } })}>
+                <option value="off">Désactivé (bouton, raccourci ou mains libres)</option>
+                <option value="kws">Écoute permanente : le micro reste ouvert et réagit au mot-clé (recommandé)</option>
+                <option value="transcript">Filtre après transcription (mains libres) : les phrases sans le mot sont ignorées</option>
+              </select>
+              <span className="hint">
+                {settings.voice.wakeMode === 'kws'
+                  ? 'Détection locale par un modèle de 3 Mo, quasi gratuite en CPU. Dire le mot seul ouvre l’écoute ; dire le mot puis la commande envoie directement. Le mot coupe aussi la voix en cours.'
+                  : settings.voice.wakeMode === 'transcript'
+                    ? 'Chaque phrase est transcrite puis filtrée : plus coûteux, à réserver à la reconnaissance locale.'
+                    : 'Le micro s’active avec le bouton, Ctrl+Shift+Espace ou la boucle mains libres.'}
+              </span>
+            </div>
+            {settings.voice.wakeMode !== 'off' && (
+              <div className="grid-2">
+                <div className="field">
+                  <label>Mot-clé</label>
+                  <input className="input" value={settings.voice.wakeWord} placeholder="jarvis" onChange={(e) => update({ voice: { wakeWord: e.target.value.toLowerCase().slice(0, 40) } })} />
+                  <span className="hint">Prononciation anglaise conseillée (« jarvis », « hey jarvis », « computer », « friday »…).</span>
+                </div>
+                {settings.voice.wakeMode === 'kws' && (
+                  <div className="field">
+                    <label>Sensibilité du mot-clé : {settings.voice.kwsSensitivity}/5</label>
+                    <input className="range" type="range" min={1} max={5} step={1} value={settings.voice.kwsSensitivity} onChange={(e) => update({ voice: { kwsSensitivity: Number(e.target.value) } })} />
+                  </div>
+                )}
               </div>
+            )}
+            {settings.voice.wakeMode === 'kws' && (
+              <WakeStatus />
             )}
             <div className="row" style={{ marginTop: 10 }}>
               <button className="btn small" onClick={() => void testStt()} disabled={settings.voice.provider === 'browser'}><Mic size={13} /> Tester la reconnaissance</button>

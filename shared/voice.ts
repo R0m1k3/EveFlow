@@ -1,7 +1,7 @@
 /** Local voice engine contract (sherpa-onnx in a utility process). Shared by main and renderer. */
 
-export type VoiceModelKind = 'stt' | 'tts';
-export type VoiceEngineKind = 'whisper' | 'sense-voice' | 'nemo-transducer' | 'kokoro' | 'piper';
+export type VoiceModelKind = 'stt' | 'tts' | 'kws';
+export type VoiceEngineKind = 'whisper' | 'sense-voice' | 'nemo-transducer' | 'kokoro' | 'piper' | 'kws-transducer';
 
 export interface VoiceSpeaker {
   id: number;
@@ -69,6 +69,19 @@ export interface SynthesizeResult {
   audioSec: number;
 }
 
+export interface KwsStartRequest {
+  modelId: string;
+  /** Wake phrases in plain text (e.g. "jarvis", "hey jarvis"). */
+  keywords: string[];
+  /** 1 (strict) .. 5 (eager) */
+  sensitivity: number;
+}
+
+export interface KwsDetection {
+  keyword: string;
+  at: number;
+}
+
 export interface VoiceEngineStatus {
   available: boolean;
   error?: string;
@@ -86,5 +99,9 @@ export const VOICE_IPC = {
   modelsProgress: 'voice:models:progress',
   transcribe: 'voice:transcribe',
   synthesize: 'voice:synthesize',
-  unload: 'voice:unload'
+  unload: 'voice:unload',
+  kwsStart: 'voice:kws:start',
+  kwsStop: 'voice:kws:stop',
+  kwsAudio: 'voice:kws:audio',
+  kwsDetected: 'voice:kws:detected'
 } as const;

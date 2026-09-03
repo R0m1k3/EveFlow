@@ -12,6 +12,8 @@ import type {
   WindowMode
 } from './ipc';
 import type {
+  KwsDetection,
+  KwsStartRequest,
   SynthesizeRequest,
   SynthesizeResult,
   TranscribeRequest,
@@ -72,5 +74,10 @@ export interface EveFlowBridge {
     transcribe: (req: TranscribeRequest) => Promise<TranscribeResult>;
     synthesize: (req: SynthesizeRequest) => Promise<SynthesizeResult>;
     unload: (id?: string) => Promise<unknown>;
+    kwsStart: (req: KwsStartRequest) => Promise<{ accepted: string[]; rejected: string[] }>;
+    kwsStop: () => Promise<void>;
+    /** Fire-and-forget 16-bit PCM frames for the keyword spotter. */
+    kwsAudio: (pcm: Uint8Array, sampleRate: number) => void;
+    onKwsDetected: (cb: (detection: KwsDetection) => void) => Unsubscribe;
   };
 }

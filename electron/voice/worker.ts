@@ -18,7 +18,10 @@ type Request =
   | { id: number; type: 'status' }
   | { id: number; type: 'transcribe'; model: ModelRef; wav: Uint8Array | string; language: string }
   | { id: number; type: 'synthesize'; model: ModelRef; text: string; speaker: number; speed: number }
-  | { id: number; type: 'unload'; modelId?: string };
+  | { id: number; type: 'unload'; modelId?: string }
+  | { id: number; type: 'kws.start'; model: ModelRef; keywordsFile: string; threshold: number; score: number }
+  | { id: number; type: 'kws.audio'; pcm: string; sampleRate: number }
+  | { id: number; type: 'kws.stop' };
 
 type Response = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: string };
 
@@ -29,6 +32,13 @@ type Sherpa = {
     decode: (s: unknown) => void;
     getResult: (s: unknown) => { text: string; lang?: string };
   };
+  KeywordSpotter: new (config: unknown) => {
+    createStream: () => KwsStream;
+    isReady: (s: KwsStream) => boolean;
+    decode: (s: KwsStream) => void;
+    reset: (s: KwsStream) => void;
+    getResult: (s: KwsStream) => { keyword?: string };
+  };
   OfflineTts: new (config: unknown) => {
     numSpeakers: number;
     sampleRate: number;
@@ -37,7 +47,10 @@ type Sherpa = {
   version: string;
 };
 
+type KwsStream = { acceptWaveform: (w: { sampleRate: number; samples: Float32Array }) => void };
 let sherpa: Sherpa | null = null;
+let kws: { spotter: InstanceType<Sherpa['KeywordSpotter']>; stream: KwsStream } | null = null;
+let notify: ((message: unknown) => void) | null = null;
 let loadError: string | null = null;
 
 function loadSherpa(): Sherpa {
@@ -225,13 +238,59 @@ function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array {
   return new Uint8Array(buffer);
 }
 
+function startKws(model: ModelRef, keywordsFile: string, threshold: number, score: number): void {
+  const s = loadSherpa();
+  kws = null;
+  const p = (f: string) => path.join(model.dir, f);
+  const enc = model.files.find((f) => f.startsWith('encoder')) ?? 'encoder.int8.onnx';
+  const dec = model.files.find((f) => f.startsWith('decoder')) ?? 'decoder.int8.onnx';
+  const join = model.files.find((f) => f.startsWith('joiner')) ?? 'joiner.int8.onnx';
+  const spotter = new s.KeywordSpotter({
+    featConfig: { sampleRate: 16000, featureDim: 80 },
+    modelConfig: { transducer: { encoder: p(enc), decoder: p(dec), joiner: p(join) }, tokens: p('tokens.txt'), numThreads: 1, provider: 'cpu', debug: 0 },
+    maxActivePaths: 4,
+    numTrailingBlanks: 1,
+    keywordsScore: score,
+    keywordsThreshold: threshold,
+    keywordsFile
+  });
+  kws = { spotter, stream: spotter.createStream() };
+}
+
+function feedKws(pcmBase64: string, sampleRate: number): void {
+  if (!kws) return;
+  const bytes = Buffer.from(pcmBase64, 'base64');
+  const int16 = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
+  let samples: Float32Array = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) samples[i] = int16[i] / 32768;
+  if (sampleRate !== 16000) samples = resampleTo16k(samples, sampleRate);
+  kws.stream.acceptWaveform({ sampleRate: 16000, samples });
+  while (kws.spotter.isReady(kws.stream)) {
+    kws.spotter.decode(kws.stream);
+    const result = kws.spotter.getResult(kws.stream);
+    if (result.keyword) {
+      kws.spotter.reset(kws.stream);
+      notify?.({ type: 'kws.detected', keyword: result.keyword, at: Date.now() });
+    }
+  }
+}
+
 // ── request handling ───────────────────────────────────────────────────────
 function handle(req: Request): unknown {
   switch (req.type) {
+    case 'kws.start':
+      startKws(req.model, req.keywordsFile, req.threshold, req.score);
+      return { ok: true };
+    case 'kws.audio':
+      feedKws(req.pcm, req.sampleRate);
+      return { ok: true };
+    case 'kws.stop':
+      kws = null;
+      return { ok: true };
     case 'status': {
       try {
         const s = loadSherpa();
-        return { available: true, version: s.version, loaded: [...recognizers.keys(), ...synthesizers.keys()] };
+        return { available: true, version: s.version, loaded: [...recognizers.keys(), ...synthesizers.keys(), ...(kws ? ['kws'] : [])] };
       } catch (err) {
         return { available: false, error: (err as Error).message, loaded: [] };
       }
@@ -271,6 +330,7 @@ function handle(req: Request): unknown {
       } else {
         recognizers.clear();
         synthesizers.clear();
+        kws = null;
       }
       return { ok: true };
     }
@@ -290,7 +350,9 @@ function respond(req: Request): Response {
 // Electron utility process transport, with a child_process fallback for tests.
 const parentPort = (process as unknown as { parentPort?: { on: (ev: 'message', cb: (e: { data: Request }) => void) => void; postMessage: (m: unknown) => void } }).parentPort;
 if (parentPort) {
+  notify = (m) => parentPort.postMessage(m);
   parentPort.on('message', (event) => parentPort.postMessage(respond(event.data)));
 } else if (process.send) {
+  notify = (m) => process.send!(m);
   process.on('message', (msg: Request) => process.send!(respond(msg)));
 }

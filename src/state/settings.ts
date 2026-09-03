@@ -19,6 +19,9 @@ export interface VoiceSettings extends SttConfig {
   /** Hands-free: only react to utterances starting with this word (local STT recommended). */
   wakeWordEnabled: boolean;
   wakeWord: string;
+  /** off = push-to-talk / hands-free; transcript = filter after transcription; kws = always-on keyword spotting. */
+  wakeMode: 'off' | 'transcript' | 'kws';
+  kwsSensitivity: number; // 1..5
 }
 
 export interface SpeechSettings extends TtsConfig {
@@ -83,6 +86,8 @@ export const DEFAULT_SETTINGS: Settings = {
     wakeChime: true,
     wakeWordEnabled: false,
     wakeWord: 'jarvis',
+    wakeMode: 'off',
+    kwsSensitivity: 3,
     localModel: 'whisper-base'
   },
   speech: {
@@ -181,6 +186,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
     }
     const merged = merge(DEFAULT_SETTINGS, saved);
     if (!merged.hermesSessionId) merged.hermesSessionId = uid('eveflow');
+    if (saved && saved.voice && saved.voice.wakeMode === undefined && saved.voice.wakeWordEnabled) merged.voice.wakeMode = 'transcript';
     set({ settings: merged, loaded: true });
     persistSet(STORAGE_KEY, merged);
   },
