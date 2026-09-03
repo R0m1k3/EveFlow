@@ -397,9 +397,10 @@ export class HermesClient {
     });
 
     let fullText = '';
+    let toolsAllowed = useTools;
     for (let iteration = 0; iteration < 6 && !aborted; iteration++) {
       const payload: Rec = { model: this.config.model || 'hermes-agent', messages, stream: true };
-      if (useTools) {
+      if (toolsAllowed) {
         payload.tools = options.localToolDefinitions;
         payload.tool_choice = 'auto';
       }
@@ -435,7 +436,15 @@ export class HermesClient {
       currentHandle = handle;
       if (!handle.start.ok) {
         await handle.done.catch(() => undefined);
-        throw new HttpError(handle.start.status, errorMessage(handle.start.status, errorChunks.join('')));
+        const detail = errorMessage(handle.start.status, errorChunks.join(''));
+        // Some Hermes builds reject client-side tool definitions: retry once without them.
+        if (toolsAllowed && handle.start.status === 400 && iteration === 0) {
+          Log.warn('hermes', `chat completions rejected the tools payload (${detail}); retrying without local tools`);
+          toolsAllowed = false;
+          iteration--;
+          continue;
+        }
+        throw new HttpError(handle.start.status, detail);
       }
       ready = true;
       const rotated = handle.start.headers['x-hermes-session-id'];
@@ -445,7 +454,7 @@ export class HermesClient {
       parser.end();
       fullText += iterationText;
 
-      if (finishReason === 'tool_calls' && useTools && toolCalls.size > 0 && !aborted) {
+      if (finishReason === 'tool_calls' && toolsAllowed && toolCalls.size > 0 && !aborted) {
         const calls = [...toolCalls.values()];
         messages.push({
           role: 'assistant',
