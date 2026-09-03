@@ -5,22 +5,46 @@ import type { LogEntry } from '../shared/ipc';
 
 const MAX_LOG_BYTES = 5 * 1024 * 1024;
 
+let stream: fs.WriteStream | null = null;
+let written = 0;
+
 export function getLogPath(): string {
   return path.join(app.getPath('userData'), 'eveflow.log');
 }
 
+function output(): fs.WriteStream {
+  if (!stream) {
+    const target = getLogPath();
+    try {
+      written = fs.statSync(target).size;
+    } catch {
+      written = 0;
+    }
+    stream = fs.createWriteStream(target, { flags: 'a' });
+    stream.on('error', (err) => console.error('[logger] write failed:', err.message));
+  }
+  return stream;
+}
+
+function rotate(): void {
+  const target = getLogPath();
+  stream?.end();
+  stream = null;
+  try {
+    fs.renameSync(target, `${target}.old`);
+  } catch {
+    /* ignore */
+  }
+  written = 0;
+}
+
 export function writeLog(entry: LogEntry): void {
   try {
-    const logPath = getLogPath();
     const data = entry.data !== undefined ? ' | ' + safeJson(entry.data) : '';
     const line = `[${entry.ts}] [${entry.level}] [${entry.tag}] ${entry.message}${data}\n`;
-    try {
-      const stat = fs.statSync(logPath);
-      if (stat.size > MAX_LOG_BYTES) fs.renameSync(logPath, logPath + '.old');
-    } catch {
-      /* first start: file does not exist yet */
-    }
-    fs.appendFileSync(logPath, line, 'utf8');
+    written += Buffer.byteLength(line);
+    if (written > MAX_LOG_BYTES) rotate();
+    output().write(line);
   } catch (err) {
     console.error('[logger] cannot write log file:', (err as Error).message);
   }

@@ -1,7 +1,7 @@
 /**
- * Text-to-speech engine with a sentence queue, prefetching and Web Audio playback so the HUD
- * reacts to the actual waveform. Providers: OpenAI-compatible /v1/audio/speech, system voices,
- * and the legacy Google Translate endpoint (no key, online only).
+ * Text-to-speech engine with a sentence queue, bounded prefetching and Web Audio playback so
+ * the HUD reacts to the actual waveform. Providers: in-app sherpa-onnx (Kokoro / Piper),
+ * OpenAI-compatible /v1/audio/speech, system voices, and the legacy Google Translate endpoint.
  */
 import { Log } from '../../lib/log';
 import { bridge } from '../../lib/bridge';
@@ -35,6 +35,8 @@ interface QueueItem {
   audio?: Promise<AudioBuffer | null>;
 }
 
+const LOOKAHEAD = 2;
+
 export function ttsEndpoint(apiUrl: string): string {
   const base = apiUrl.trim().replace(/\/+$/, '');
   if (base.endsWith('/speech')) return base;
@@ -46,8 +48,7 @@ export function ttsEndpoint(apiUrl: string): string {
 export class TtsEngine {
   private queue: QueueItem[] = [];
   private playing = false;
-  private currentSource: AudioBufferSourceNode | null = null;
-  private currentUtterance: SpeechSynthesisUtterance | null = null;
+  private cancelCurrent: (() => void) | null = null;
   private streamBuffer = '';
   private generation = 0;
   private config: TtsConfig;
@@ -60,7 +61,6 @@ export class TtsEngine {
 
   updateConfig(config: TtsConfig): void {
     this.config = config;
-    audioBus.setVolume(config.volume);
   }
 
   onState(listener: (state: TtsState) => void): () => void {
@@ -78,10 +78,18 @@ export class TtsEngine {
     for (const l of this.listeners) l(state);
   }
 
-  /** Speak a finished text (clears any pending speech first). */
-  speak(text: string): void {
-    this.stop();
-    for (const chunk of chunkForSpeech(text)) this.enqueue(chunk);
+  /**
+   * Speak a finished text. With `interrupt` (default) pending speech is discarded first;
+   * without it the text is inserted ahead of the queue and streamed speech resumes afterwards.
+   */
+  speak(text: string, options: { interrupt?: boolean } = {}): void {
+    const interrupt = options.interrupt ?? true;
+    if (interrupt) this.stop();
+    const items = chunkForSpeech(text).map((chunk) => this.makeItem(chunk)).filter((i): i is QueueItem => !!i);
+    if (interrupt) this.queue.push(...items);
+    else this.queue.unshift(...items);
+    this.fillPrefetch();
+    void this.drain();
   }
 
   /** Feed streamed tokens; complete sentences are spoken as soon as they are available. */
@@ -100,32 +108,32 @@ export class TtsEngine {
   }
 
   enqueue(text: string): void {
-    if (this.config.provider === 'off') return;
-    const clean = cleanForSpeech(text);
-    if (!clean || !/[\p{L}\p{N}]/u.test(clean)) return;
-    const item: QueueItem = { text: clean };
-    if (this.config.provider !== 'system') item.audio = this.prefetch(clean, this.generation);
+    const item = this.makeItem(text);
+    if (!item) return;
     this.queue.push(item);
+    this.fillPrefetch();
     void this.drain();
+  }
+
+  private makeItem(text: string): QueueItem | null {
+    if (this.config.provider === 'off') return null;
+    const clean = cleanForSpeech(text);
+    if (!clean || !/[\p{L}\p{N}]/u.test(clean)) return null;
+    return { text: clean };
+  }
+
+  /** Keep at most LOOKAHEAD synthesis requests in flight ahead of playback. */
+  private fillPrefetch(): void {
+    if (this.config.provider === 'system') return;
+    for (const item of this.queue.slice(0, LOOKAHEAD)) item.audio ??= this.prefetch(item.text, this.generation);
   }
 
   stop(): void {
     this.generation++;
     this.queue = [];
     this.streamBuffer = '';
-    if (this.currentSource) {
-      try {
-        this.currentSource.onended = null;
-        this.currentSource.stop();
-      } catch {
-        /* already stopped */
-      }
-      this.currentSource = null;
-    }
-    if (this.currentUtterance) {
-      this.currentUtterance.onend = null;
-      this.currentUtterance = null;
-    }
+    this.cancelCurrent?.();
+    this.cancelCurrent = null;
     if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
     audioBus.setSyntheticLevel(0);
     this.playing = false;
@@ -138,15 +146,17 @@ export class TtsEngine {
     const gen = this.generation;
     while (this.queue.length > 0 && gen === this.generation) {
       const item = this.queue.shift()!;
+      this.fillPrefetch();
       try {
-        if (item.audio) {
+        if (this.config.provider !== 'system') {
           this.setState('loading');
-          const buffer = await item.audio;
+          const buffer = await (item.audio ?? this.prefetch(item.text, gen));
           if (gen !== this.generation) break;
           if (buffer) {
             this.setState('speaking');
             await this.playBuffer(buffer, gen);
           } else {
+            this.setState('speaking');
             await this.speakSystem(item.text, gen);
           }
         } else {
@@ -174,7 +184,7 @@ export class TtsEngine {
         return audioBus.context.decodeAudioData(copy);
       })
       .catch((err) => {
-        Log.warn('tts', `synthesis failed, falling back to system voice: ${(err as Error).message}`);
+        if (gen === this.generation) Log.warn('tts', `synthesis failed, falling back to system voice: ${(err as Error).message}`);
         return null;
       });
   }
@@ -238,15 +248,26 @@ export class TtsEngine {
     return new Promise((resolve) => {
       if (gen !== this.generation) return resolve();
       const ctx = audioBus.context;
+      audioBus.setVolume(this.config.volume);
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       if (this.config.provider === 'google-free') source.playbackRate.value = Math.max(0.5, Math.min(2, this.config.speed || 1));
       source.connect(audioBus.output);
-      source.onended = () => {
-        if (this.currentSource === source) this.currentSource = null;
+      const finish = () => {
+        if (this.cancelCurrent === cancel) this.cancelCurrent = null;
         resolve();
       };
-      this.currentSource = source;
+      const cancel = () => {
+        source.onended = null;
+        try {
+          source.stop();
+        } catch {
+          /* already stopped */
+        }
+        finish();
+      };
+      source.onended = finish;
+      this.cancelCurrent = cancel;
       source.start();
     });
   }
@@ -268,12 +289,17 @@ export class TtsEngine {
         if (pulse) clearInterval(pulse);
         pulse = null;
         audioBus.setSyntheticLevel(0);
-        if (this.currentUtterance === utterance) this.currentUtterance = null;
+        if (this.cancelCurrent === cancel) this.cancelCurrent = null;
         resolve();
+      };
+      const cancel = () => {
+        utterance.onend = null;
+        utterance.onerror = null;
+        finish();
       };
       utterance.onend = finish;
       utterance.onerror = finish;
-      this.currentUtterance = utterance;
+      this.cancelCurrent = cancel;
       speechSynthesis.speak(utterance);
     });
   }

@@ -16,7 +16,7 @@ interface ModelRef {
 
 type Request =
   | { id: number; type: 'status' }
-  | { id: number; type: 'transcribe'; model: ModelRef; wav: Uint8Array; language: string }
+  | { id: number; type: 'transcribe'; model: ModelRef; wav: Uint8Array | string; language: string }
   | { id: number; type: 'synthesize'; model: ModelRef; text: string; speaker: number; speed: number }
   | { id: number; type: 'unload'; modelId?: string };
 
@@ -32,7 +32,7 @@ type Sherpa = {
   OfflineTts: new (config: unknown) => {
     numSpeakers: number;
     sampleRate: number;
-    generate: (req: { text: string; sid: number; speed: number }) => { samples: Float32Array; sampleRate: number };
+    generate: (req: { text: string; sid: number; speed: number; enableExternalBuffer?: boolean }) => { samples: Float32Array; sampleRate: number };
   };
   version: string;
 };
@@ -136,16 +136,20 @@ function getSynthesizer(model: ModelRef) {
 // ── audio helpers ──────────────────────────────────────────────────────────
 function decodeWav(bytes: Uint8Array): { samples: Float32Array; sampleRate: number } {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) !== 'RIFF') throw new Error('WAV invalide');
+  if (String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) !== 'RIFF' || String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]) !== 'WAVE') {
+    throw new Error('WAV invalide');
+  }
   let offset = 12;
   let sampleRate = 16000;
   let channels = 1;
   let bits = 16;
+  let format = 1; // 1 = PCM, 3 = IEEE float
   let data: { start: number; length: number } | null = null;
   while (offset + 8 <= bytes.byteLength) {
     const id = String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
     const size = view.getUint32(offset + 4, true);
     if (id === 'fmt ') {
+      format = view.getUint16(offset + 8, true);
       channels = view.getUint16(offset + 10, true);
       sampleRate = view.getUint32(offset + 12, true);
       bits = view.getUint16(offset + 22, true);
@@ -163,7 +167,16 @@ function decodeWav(bytes: Uint8Array): { samples: Float32Array; sampleRate: numb
     let sum = 0;
     for (let c = 0; c < channels; c++) {
       const pos = data.start + (i * channels + c) * bytesPerSample;
-      sum += bits === 16 ? view.getInt16(pos, true) / 32768 : bits === 32 ? view.getInt32(pos, true) / 2147483648 : (bytes[pos] - 128) / 128;
+      sum +=
+        format === 3 && bits === 32
+          ? view.getFloat32(pos, true)
+          : bits === 16
+            ? view.getInt16(pos, true) / 32768
+            : bits === 24
+              ? (((bytes[pos] | (bytes[pos + 1] << 8) | (bytes[pos + 2] << 16)) << 8) >> 8) / 8388608
+              : bits === 32
+                ? view.getInt32(pos, true) / 2147483648
+                : (bytes[pos] - 128) / 128;
     }
     samples[i] = sum / channels;
   }
@@ -225,8 +238,11 @@ function handle(req: Request): unknown {
     }
     case 'transcribe': {
       const started = Date.now();
-      const { samples, sampleRate } = decodeWav(req.wav);
+      // Audio crosses the process boundary as base64: V8 refuses to serialize external buffers.
+      const bytes = typeof req.wav === 'string' ? new Uint8Array(Buffer.from(req.wav, 'base64')) : req.wav;
+      const { samples, sampleRate } = decodeWav(bytes);
       const pcm = resampleTo16k(samples, sampleRate);
+      if (pcm.length < 1600) throw new Error('Audio trop court');
       const recognizer = getRecognizer(req.model, req.language);
       const stream = recognizer.createStream();
       stream.acceptWaveform({ sampleRate: 16000, samples: pcm });
@@ -238,8 +254,15 @@ function handle(req: Request): unknown {
       const started = Date.now();
       const tts = getSynthesizer(req.model);
       const sid = Math.max(0, Math.min(tts.numSpeakers - 1, Math.floor(req.speaker)));
-      const audio = tts.generate({ text: req.text, sid, speed: Math.max(0.5, Math.min(2, req.speed || 1)) });
-      return { wav: encodeWav(audio.samples, audio.sampleRate), sampleRate: audio.sampleRate, durationMs: Date.now() - started, audioSec: audio.samples.length / audio.sampleRate };
+      // Electron forbids N-API external buffers: ask sherpa-onnx to copy the samples into a V8 buffer.
+      const audio = tts.generate({ text: req.text, sid, speed: Math.max(0.5, Math.min(2, req.speed || 1)), enableExternalBuffer: false });
+      const wav = encodeWav(audio.samples, audio.sampleRate);
+      return {
+        wav: Buffer.from(wav.buffer, wav.byteOffset, wav.byteLength).toString('base64'),
+        sampleRate: audio.sampleRate,
+        durationMs: Date.now() - started,
+        audioSec: audio.samples.length / audio.sampleRate
+      };
     }
     case 'unload': {
       if (req.modelId) {

@@ -35,9 +35,10 @@ class SpeechFacade {
     return this.engine?.isActive ?? false;
   }
 
-  say(text: string): void {
+  say(text: string, options: { interrupt?: boolean } = {}): void {
     if (useSettings.getState().settings.speech.provider === 'off') return;
-    this.tts.speak(text);
+    // While an answer streams, spoken notices are inserted without discarding the rest.
+    this.tts.speak(text, { interrupt: options.interrupt ?? !this.streaming });
   }
 
   pushStream(delta: string): void {

@@ -22,7 +22,7 @@ export const VOICE_CATALOG: VoiceModelSpec[] = [
     kind: 'stt',
     engine: 'whisper',
     name: 'Whisper base (multilingue)',
-    description: 'Rapide sur CPU, bonne qualité en français pour des commandes courtes.',
+    description: 'Le plus rapide sur CPU ; précision moyenne en français, suffisante pour des commandes courtes.',
     languages: ['fr', 'en', 'multi'],
     sizeMb: 208,
     url: `${ASR}/sherpa-onnx-whisper-base.tar.bz2`,
@@ -35,12 +35,13 @@ export const VOICE_CATALOG: VoiceModelSpec[] = [
     kind: 'stt',
     engine: 'whisper',
     name: 'Whisper small (multilingue)',
-    description: 'Plus précis que base, environ trois fois plus lent.',
+    description: 'Recommandé pour le français : nettement plus précis que base, environ trois fois plus lent.',
     languages: ['fr', 'en', 'multi'],
     sizeMb: 640,
     url: `${ASR}/sherpa-onnx-whisper-small.tar.bz2`,
     dir: 'sherpa-onnx-whisper-small',
-    files: ['small-encoder.int8.onnx', 'small-decoder.int8.onnx', 'small-tokens.txt']
+    files: ['small-encoder.int8.onnx', 'small-decoder.int8.onnx', 'small-tokens.txt'],
+    recommended: true
   },
   {
     id: 'whisper-turbo',

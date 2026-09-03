@@ -65,12 +65,14 @@ export function cleanForSpeech(raw: string): string {
   return applyPhonetics(text);
 }
 
+const PHONETIC_RULES: Array<[RegExp, string]> = Object.entries(PHONETIC).map(([key, value]) => {
+  const escaped = key.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+  return [new RegExp(`(?<=^|\\s|\\p{P})${escaped}(?=$|\\s|\\p{P})`, 'giu'), value];
+});
+
 function applyPhonetics(text: string): string {
   let out = text;
-  for (const [key, value] of Object.entries(PHONETIC)) {
-    const escaped = key.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-    out = out.replace(new RegExp(`(?<=^|\\s|\\p{P})${escaped}(?=$|\\s|\\p{P})`, 'giu'), value);
-  }
+  for (const [regex, value] of PHONETIC_RULES) out = out.replace(regex, value);
   return out;
 }
 

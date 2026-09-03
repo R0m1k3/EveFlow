@@ -71,9 +71,9 @@ class AudioBus {
   }
 
   /** Normalised output spectrum (0..1) with `bins` values, low to high frequency. */
-  spectrum(bins: number, source: 'output' | 'input' = 'output'): Float32Array {
+  spectrum(bins: number, source: 'output' | 'input' = 'output', out: Float32Array = new Float32Array(bins)): Float32Array {
     const analyser = source === 'output' ? this.outputAnalyser : this.inputAnalyser;
-    const out = new Float32Array(bins);
+    out.fill(0);
     if (!analyser) {
       if (this.synthetic > 0) {
         const t = performance.now() / 1000;

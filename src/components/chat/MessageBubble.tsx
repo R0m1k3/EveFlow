@@ -1,4 +1,4 @@
-import { memo, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Copy, Volume2, Check } from 'lucide-react';
@@ -28,6 +28,10 @@ function openLink(href: string): void {
 
 export const MessageBubble = memo(function MessageBubble({ message, assistantName, userName, showReasoning, compact, onOpenImage }: Props) {
   const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (copyTimer.current) window.clearTimeout(copyTimer.current);
+  }, []);
   const isUser = message.role === 'user';
   const who = isUser ? userName || 'VOUS' : message.role === 'system' ? 'SYSTÈME' : assistantName;
   const status = message.status ?? 'done';
@@ -35,7 +39,8 @@ export const MessageBubble = memo(function MessageBubble({ message, assistantNam
   const copy = () => {
     navigator.clipboard.writeText(message.content).then(() => {
       setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
+      if (copyTimer.current) window.clearTimeout(copyTimer.current);
+      copyTimer.current = window.setTimeout(() => setCopied(false), 1200);
     }).catch(() => undefined);
   };
 
@@ -50,8 +55,8 @@ export const MessageBubble = memo(function MessageBubble({ message, assistantNam
           {message.usage?.total_tokens ? <span>{message.usage.total_tokens} tok</span> : null}
           {message.role === 'assistant' && status === 'done' && (
             <span className="msg-actions">
-              <button className="icon-btn" title="Copier" onClick={copy}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>
-              <button className="icon-btn" title="Lire à voix haute" onClick={() => speech.say(message.content)}><Volume2 size={13} /></button>
+              <button className="icon-btn" title="Copier" aria-label="Copier le message" onClick={copy}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>
+              <button className="icon-btn" title="Lire à voix haute" aria-label="Lire à voix haute" onClick={() => speech.say(message.content)}><Volume2 size={13} /></button>
             </span>
           )}
         </div>

@@ -167,8 +167,10 @@ export interface SendOptions {
 }
 
 export interface SendHandle {
-  /** Resolves with the final assistant text. */
+  /** Resolves with the final assistant text (partial text when aborted). */
   result: Promise<string>;
   abort: () => void;
+  /** True once abort() was called; the caller must not treat the result as a completed reply. */
+  readonly aborted: boolean;
   transport: Exclude<HermesTransport, 'auto'>;
 }

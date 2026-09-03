@@ -67,16 +67,33 @@ export function CommandBar({ compact }: Props) {
 
   const submit = async () => {
     const text = draft.trim();
-    if (steerMode && currentRunId) {
+    if (steerMode) {
+      if (!currentRunId) {
+        setSteerMode(false);
+        return;
+      }
       if (await steer(text)) setDraft('');
+      inputRef.current?.focus();
       return;
     }
     if (!text && images.length === 0) return;
     const attached = images;
     setDraft('');
     setImages([]);
+    inputRef.current?.focus();
     await sendMessage(text, attached);
   };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -131,6 +148,8 @@ export function CommandBar({ compact }: Props) {
           className={`mic-btn ${micClass}`}
           style={{ ['--level' as string]: level }}
           title={micTitle}
+          aria-label={micTitle}
+          aria-pressed={listening}
           onClick={() => voiceController.toggle()}
           disabled={phase === 'transcribing'}
         >
@@ -154,11 +173,11 @@ export function CommandBar({ compact }: Props) {
         )}
         <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => void onFiles(e.target.files)} />
         {isSending && !steerMode ? (
-          <button className="send-btn stop" title="Interrompre (Échap)" onClick={stopGeneration}>
+          <button className="send-btn stop" title="Interrompre (Échap)" aria-label="Interrompre" onClick={stopGeneration}>
             <Square size={18} />
           </button>
         ) : (
-          <button className="send-btn primary" title={steerMode ? 'Envoyer la consigne' : 'Envoyer (Entrée)'} onClick={() => void submit()} disabled={!draft.trim() && images.length === 0}>
+          <button className="send-btn primary" title={steerMode ? 'Envoyer la consigne' : 'Envoyer (Entrée)'} aria-label={steerMode ? 'Envoyer la consigne' : 'Envoyer'} onClick={() => void submit()} disabled={!draft.trim() && images.length === 0}>
             {steerMode ? <Navigation size={18} /> : <Send size={18} />}
           </button>
         )}

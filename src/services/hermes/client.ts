@@ -261,6 +261,7 @@ export class HermesClient {
       for (const event of normalizeLifecycleEvent(eventName, data)) onEvent(event);
     });
     const errorChunks: string[] = [];
+    let handleReady = false;
     const handle = await httpStream(
       {
         url: `${this.base}${path}`,
@@ -271,7 +272,6 @@ export class HermesClient {
       },
       { onChunk: (text) => (handleReady ? parser.feed(text) : errorChunks.push(text)) }
     );
-    let handleReady = handle.start.ok;
     if (!handle.start.ok) {
       await handle.done.catch(() => undefined);
       throw new HttpError(handle.start.status, errorMessage(handle.start.status, errorChunks.join('')));
@@ -285,25 +285,45 @@ export class HermesClient {
 
   send(options: SendOptions, transport: ResolvedTransport): SendHandle {
     const effective: ResolvedTransport = options.images?.length && transport === 'runs' ? 'completions' : transport;
-    let abort: () => void = () => undefined;
+    let aborted = false;
+    let abortImpl: () => void = () => undefined;
+    const setAbort = (fn: () => void) => {
+      abortImpl = fn;
+      if (aborted) fn();
+    };
+    const isAborted = () => aborted;
     const result =
       effective === 'runs'
-        ? this.sendViaRuns(options, (fn) => (abort = fn))
+        ? this.sendViaRuns(options, setAbort, isAborted)
         : effective === 'sessions'
-          ? this.sendViaSessions(options, (fn) => (abort = fn))
-          : this.sendViaCompletions(options, (fn) => (abort = fn));
-    return { result, abort: () => abort(), transport: effective };
+          ? this.sendViaSessions(options, setAbort, isAborted)
+          : this.sendViaCompletions(options, setAbort, isAborted);
+    return {
+      result,
+      transport: effective,
+      get aborted() {
+        return aborted;
+      },
+      abort: () => {
+        aborted = true;
+        abortImpl();
+      }
+    };
   }
 
-  private async sendViaRuns(options: SendOptions, setAbort: (fn: () => void) => void): Promise<string> {
+  private async sendViaRuns(options: SendOptions, setAbort: (fn: () => void) => void, isAborted: () => boolean): Promise<string> {
     const { onEvent } = options;
     const run = await this.startRun({
       input: options.text,
-      session_id: options.sessionId || undefined,
+      session_id: plainSession(options.sessionId) || undefined,
       instructions: this.config.instructions || undefined,
       model: this.config.model || undefined
     });
     const runId = run.run_id;
+    if (isAborted()) {
+      this.stopRun(runId).catch(() => undefined);
+      return '';
+    }
     onEvent({ kind: 'run.started', runId });
     Log.info('hermes', `run ${runId} started`);
 
@@ -329,7 +349,7 @@ export class HermesClient {
     });
 
     await handle.done;
-    if (stopped) return streamedText;
+    if (stopped || isAborted()) return streamedText;
     if (failure) throw new Error(failure);
 
     if (!completed) {
@@ -349,7 +369,7 @@ export class HermesClient {
     return finalText || streamedText;
   }
 
-  private async sendViaSessions(options: SendOptions, setAbort: (fn: () => void) => void): Promise<string> {
+  private async sendViaSessions(options: SendOptions, setAbort: (fn: () => void) => void, isAborted: () => boolean): Promise<string> {
     const { onEvent } = options;
     let sessionId = options.sessionId;
     if (!sessionId || !sessionId.startsWith('hs:')) {
@@ -357,6 +377,7 @@ export class HermesClient {
       sessionId = `hs:${session.id}`;
       onEvent({ kind: 'session', sessionId });
     }
+    if (isAborted()) return '';
     const realId = sessionId.slice(3);
     const body: Rec = { input: options.text };
     if (this.config.instructions) body.instructions = this.config.instructions;
@@ -374,11 +395,12 @@ export class HermesClient {
     });
     setAbort(() => handle.abort());
     await handle.done;
+    if (isAborted()) return streamed;
     if (failure) throw new Error(failure);
     return finalText || streamed;
   }
 
-  private async sendViaCompletions(options: SendOptions, setAbort: (fn: () => void) => void): Promise<string> {
+  private async sendViaCompletions(options: SendOptions, setAbort: (fn: () => void) => void, isAborted: () => boolean): Promise<string> {
     const { onEvent } = options;
     const useTools = this.config.localTools && !!options.localToolExecutor && !!options.localToolDefinitions?.length;
     const messages: HermesChatMessage[] = [];
@@ -389,16 +411,13 @@ export class HermesClient {
       : options.text;
     messages.push({ role: 'user', content: userContent });
 
-    let aborted = false;
     let currentHandle: StreamHandle | null = null;
-    setAbort(() => {
-      aborted = true;
-      currentHandle?.abort();
-    });
+    setAbort(() => currentHandle?.abort());
+    const aborted = () => isAborted();
 
     let fullText = '';
     let toolsAllowed = useTools;
-    for (let iteration = 0; iteration < 6 && !aborted; iteration++) {
+    for (let iteration = 0; iteration < 6 && !aborted(); iteration++) {
       const payload: Rec = { model: this.config.model || 'hermes-agent', messages, stream: true };
       if (toolsAllowed) {
         payload.tools = options.localToolDefinitions;
@@ -428,7 +447,8 @@ export class HermesClient {
       });
 
       const headers = this.headers({ Accept: 'text/event-stream' });
-      if (options.sessionId) headers['X-Hermes-Session-Id'] = options.sessionId;
+      const sessionId = plainSession(options.sessionId);
+      if (sessionId) headers['X-Hermes-Session-Id'] = sessionId;
       const handle = await httpStream(
         { url: `${this.base}/v1/chat/completions`, method: 'POST', headers, body: JSON.stringify(payload), timeoutMs: 10 * 60_000 },
         { onChunk: (text) => (ready ? parser.feed(text) : errorChunks.push(text)) }
@@ -454,7 +474,7 @@ export class HermesClient {
       parser.end();
       fullText += iterationText;
 
-      if (finishReason === 'tool_calls' && toolsAllowed && toolCalls.size > 0 && !aborted) {
+      if (finishReason === 'tool_calls' && toolsAllowed && toolCalls.size > 0 && !aborted()) {
         const calls = [...toolCalls.values()];
         messages.push({
           role: 'assistant',
@@ -471,9 +491,14 @@ export class HermesClient {
       }
       break;
     }
-    onEvent({ kind: 'completed', status: aborted ? 'cancelled' : 'completed', text: fullText });
+    onEvent({ kind: 'completed', status: aborted() ? 'cancelled' : 'completed', text: fullText });
     return fullText;
   }
+}
+
+/** Session ids created by the sessions transport carry an `hs:` prefix; other endpoints get the bare id. */
+export function plainSession(id: string): string {
+  return id.startsWith('hs:') ? id.slice(3) : id;
 }
 
 export function normalizeJob(job: HermesJob): HermesJob {

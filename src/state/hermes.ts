@@ -57,6 +57,8 @@ interface HermesStore {
 }
 
 const CACHE_KEY = 'eveflow.hermes.cache.v2';
+let connectInflight: Promise<void> | null = null;
+let lastCacheSnapshot = '';
 const isTerminal = (status: string) => ['ok', 'failed', 'delivery_failed', 'completed', 'error'].includes(status.toLowerCase());
 
 function runFromJob(job: HermesJob): JobRun | null {
@@ -98,7 +100,9 @@ export const useHermes = create<HermesStore>((set, get) => ({
     return new HermesClient({ ...config, model });
   },
 
-  connect: async () => {
+  connect: () => {
+    if (connectInflight) return connectInflight;
+    connectInflight = (async () => {
     const config = useSettings.getState().settings.hermes;
     if (!config.url.trim()) {
       set({ link: 'offline', linkDetail: 'URL Hermes non configurée' });
@@ -126,6 +130,10 @@ export const useHermes = create<HermesStore>((set, get) => ({
       set({ link: 'offline', linkDetail: message, transport: resolveTransport(config, null) });
       Log.warn('hermes', `connection failed: ${message}`);
     }
+    })().finally(() => {
+      connectInflight = null;
+    });
+    return connectInflight;
   },
 
   refreshCatalog: async () => {
@@ -157,13 +165,18 @@ export const useHermes = create<HermesStore>((set, get) => ({
       const merged = [...incoming, ...previous.filter((r) => !incoming.some((i) => i.id === r.id))]
         .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
         .slice(0, 100);
-      set({ jobs, jobRuns: merged, lastSyncAt: Date.now(), link: get().link === 'offline' ? 'online' : get().link });
-      persistSet(CACHE_KEY, { jobs, jobRuns: merged, syncedAt: Date.now() });
+      set({ jobs, jobRuns: merged, lastSyncAt: Date.now(), link: get().link === 'offline' || get().link === 'degraded' ? 'online' : get().link });
+      const snapshot = JSON.stringify({ jobs, jobRuns: merged });
+      if (snapshot !== lastCacheSnapshot) {
+        lastCacheSnapshot = snapshot;
+        persistSet(CACHE_KEY, { jobs, jobRuns: merged, syncedAt: Date.now() });
+      }
     } catch (err) {
       const message = (err as Error).message;
       Log.warn('hermes', `jobs sync failed: ${message}`);
       if (/HTTP 404/.test(message)) return; // jobs API disabled on this server
-      set({ link: 'offline', linkDetail: message });
+      // A failing jobs poll does not mean chat is down: degrade, and let the next health probe decide.
+      set({ linkDetail: message, link: get().link === 'online' ? 'degraded' : get().link });
     }
   },
 

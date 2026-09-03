@@ -20,6 +20,8 @@ export class SseParser {
     this.buffer += chunk;
     let index: number;
     while ((index = this.buffer.search(/\r\n|\n|\r/)) !== -1) {
+      // A trailing "\r" may be the first half of a "\r\n" split across chunks: wait for more data.
+      if (this.buffer[index] === '\r' && index === this.buffer.length - 1) break;
       const line = this.buffer.slice(0, index);
       const sepLength = this.buffer.startsWith('\r\n', index) ? 2 : 1;
       this.buffer = this.buffer.slice(index + sepLength);

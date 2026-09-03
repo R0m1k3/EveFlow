@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ShieldAlert, HelpCircle, KeyRound } from 'lucide-react';
 import { resolvePending } from '../../services/conversation';
 import { useChat, type PendingRequest } from '../../state/chat';
@@ -7,10 +7,22 @@ function RequestCard({ request }: { request: PendingRequest }) {
   const [answer, setAnswer] = useState('');
   const icon = request.kind === 'approval' ? <ShieldAlert size={16} /> : request.kind === 'clarify' ? <HelpCircle size={16} /> : <KeyRound size={16} />;
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        if (request.kind === 'approval') void resolvePending(request, 'deny');
+        else useChat.getState().removePending(request.id);
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [request]);
+
   return (
-    <div className="modal">
+    <div className="modal" role="dialog" aria-modal="true" aria-labelledby={`req-${request.id}`}>
       <div className="request-card">
-        <div className="title">
+        <div className="title" id={`req-${request.id}`}>
           {icon}
           {request.title}
           {request.tool && <span className="chip warn">{request.tool}</span>}
@@ -20,7 +32,7 @@ function RequestCard({ request }: { request: PendingRequest }) {
         {request.kind === 'approval' ? (
           <div className="actions">
             <button className="btn danger" onClick={() => void resolvePending(request, 'deny')}>Refuser</button>
-            <button className="btn" onClick={() => void resolvePending(request, 'once')}>Autoriser une fois</button>
+            <button className="btn" autoFocus onClick={() => void resolvePending(request, 'once')}>Autoriser une fois</button>
             <button className="btn" onClick={() => void resolvePending(request, 'session')}>Pour la session</button>
             <button className="btn primary" onClick={() => void resolvePending(request, 'always')}>Toujours</button>
           </div>

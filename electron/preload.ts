@@ -26,7 +26,8 @@ const api: EveFlowBridge = {
   window: {
     control: (action: 'minimize' | 'maximize' | 'close' | 'hide') => ipcRenderer.send(IPC.windowControl, action),
     setMode: (mode: WindowMode) => ipcRenderer.send(IPC.windowSetMode, mode),
-    onModeChanged: (cb: (mode: WindowMode) => void) => subscribe<WindowMode>(IPC.windowModeChanged, cb)
+    onModeChanged: (cb: (mode: WindowMode) => void) => subscribe<WindowMode>(IPC.windowModeChanged, cb),
+    onVisibility: (cb: (visible: boolean) => void) => subscribe<boolean>(IPC.windowVisibility, cb)
   },
   log: (entry: LogEntry) => ipcRenderer.send(IPC.log, entry),
   store: {

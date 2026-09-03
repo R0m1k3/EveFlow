@@ -35,16 +35,20 @@ export function getWebhookStatus(): WebhookStatus {
 export function stopWebhookServer(): Promise<void> {
   return new Promise((resolve) => {
     if (!server) return resolve();
-    server.close(() => resolve());
+    const current = server;
     server = null;
     status = { ...status, listening: false };
+    current.closeAllConnections();
+    current.close(() => resolve());
   });
 }
 
 export async function startWebhookServer(getWindow: () => BrowserWindow | null, options: WebhookOptions): Promise<WebhookStatus> {
   await stopWebhookServer();
   const { port, secret } = options;
-  const host = options.host ?? '0.0.0.0';
+  // Without a shared secret the hook only listens on loopback: anyone on the LAN could otherwise inject messages.
+  const host = options.host ?? (secret ? '0.0.0.0' : '127.0.0.1');
+  if (host !== '127.0.0.1' && !secret) log('WARN', 'webhook', `listening on ${host} without a secret`);
 
   server = http.createServer((req, res) => {
     const json = (code: number, payload: unknown) => {
@@ -69,19 +73,24 @@ export async function startWebhookServer(getWindow: () => BrowserWindow | null, 
       }
     }
 
-    let body = '';
+    const chunks: Buffer[] = [];
+    let bytes = 0;
     let tooLarge = false;
     req.on('data', (chunk: Buffer) => {
       if (tooLarge) return;
-      body += chunk.toString('utf8');
-      if (body.length > MAX_BODY_BYTES) {
+      bytes += chunk.length;
+      if (bytes > MAX_BODY_BYTES) {
         tooLarge = true;
-        json(413, { error: 'Payload too large' });
-        req.destroy();
+        res.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' });
+        res.end(JSON.stringify({ error: 'Payload too large' }), () => req.socket.destroy());
+        return;
       }
+      chunks.push(chunk);
     });
     req.on('end', () => {
       if (tooLarge) return;
+      // Concatenate before decoding so multibyte UTF-8 (accents, emoji) split across chunks stays intact.
+      const body = Buffer.concat(chunks).toString('utf8');
       try {
         const raw: unknown = body.trim() ? JSON.parse(body) : {};
         const events = normalizeHermesPush(raw);
@@ -99,13 +108,18 @@ export async function startWebhookServer(getWindow: () => BrowserWindow | null, 
   });
 
   return new Promise((resolve) => {
-    server!.once('error', (err: NodeJS.ErrnoException) => {
+    const instance = server!;
+    instance.on('error', (err: NodeJS.ErrnoException) => {
       log('ERROR', 'webhook', `server error: ${err.message}`);
       status = { listening: false, port, path: WEBHOOK_PATH, secretConfigured: !!secret, error: err.message };
-      server = null;
+      if (server === instance) server = null;
       resolve(status);
     });
-    server!.listen(port, host, () => {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      instance.emit('error', new Error(`port invalide : ${port}`));
+      return;
+    }
+    instance.listen(port, host, () => {
       log('INFO', 'webhook', `listening on http://${host}:${port}${WEBHOOK_PATH}`);
       status = { listening: true, port, path: WEBHOOK_PATH, secretConfigured: !!secret };
       resolve(status);

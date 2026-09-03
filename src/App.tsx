@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
 import type { WindowMode } from '../shared/ipc';
 import { bridge } from './lib/bridge';
@@ -99,15 +99,23 @@ function useWindowMode(): WindowMode {
   return mode;
 }
 
-function ErrorBanner() {
+/** Errors surface as a transient toast over the core instead of shifting the layout. */
+function ErrorToast() {
   const error = useChat((s) => s.error);
   const setError = useChat((s) => s.setError);
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(null), 9000);
+    return () => clearTimeout(timer);
+  }, [error, setError]);
   if (!error) return null;
   return (
-    <div className="error-banner">
-      <AlertTriangle size={16} />
-      <span>{error}</span>
-      <button className="icon-btn" onClick={() => setError(null)}><X size={14} /></button>
+    <div className="toast-stack">
+      <div className="error-banner" role="alert">
+        <AlertTriangle size={16} />
+        <span>{error}</span>
+        <button className="icon-btn" aria-label="Fermer" onClick={() => setError(null)}><X size={14} /></button>
+      </div>
     </div>
   );
 }
@@ -118,15 +126,25 @@ export default function App() {
   const mode = useWindowMode();
   const showTelemetry = useSettings((s) => s.settings.ui.showTelemetry);
   const [showSettings, setShowSettings] = useState(false);
+  const [showOps, setShowOps] = useState(false);
+  const opsBadge = useChat((s) => s.activity.filter((a) => a.status === 'running').length) + useHermes((s) => s.jobRuns.filter((r) => !r.read).length);
+  const showSettingsRef = useRef(false);
+  const showOpsRef = useRef(false);
+  showSettingsRef.current = showSettings;
+  showOpsRef.current = showOps;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && showSettings) setShowSettings(false);
+      if (e.key === 'Escape') {
+        if (showSettingsRef.current) setShowSettings(false);
+        else if (showOpsRef.current) setShowOps(false);
+      }
       if (e.key === ',' && (e.ctrlKey || e.metaKey)) setShowSettings((v) => !v);
+      if (e.key.toLowerCase() === 'o' && (e.ctrlKey || e.metaKey) && e.shiftKey) setShowOps((v) => !v);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [showSettings]);
+  }, []);
 
   if (!loaded) {
     return (
@@ -147,22 +165,22 @@ export default function App() {
 
   return (
     <div className="hud-root">
-      <TopBar onOpenSettings={() => setShowSettings(true)} />
+      <TopBar onOpenSettings={() => setShowSettings(true)} onToggleOps={() => setShowOps((v) => !v)} opsBadge={opsBadge} />
       <div className="hud-body">
         <div className="hud-column">
           <ChatPanel />
         </div>
         <div className="hud-column">
-          <ErrorBanner />
           <section className="panel bracket" style={{ flex: 1 }}>
             <CoreStage />
           </section>
         </div>
-        <div className="hud-column ops-column">
+        <div className={`hud-column ops-column${showOps ? ' open' : ''}`}>
           <OpsPanel />
           {showTelemetry && <Telemetry />}
         </div>
       </div>
+      <ErrorToast />
       {showSettings && <SettingsDrawer onClose={() => setShowSettings(false)} />}
       <PendingRequests />
     </div>

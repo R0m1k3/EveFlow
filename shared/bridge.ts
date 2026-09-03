@@ -29,6 +29,8 @@ export interface EveFlowBridge {
     control: (action: 'minimize' | 'maximize' | 'close' | 'hide') => void;
     setMode: (mode: WindowMode) => void;
     onModeChanged: (cb: (mode: WindowMode) => void) => Unsubscribe;
+    /** Fires when the window is shown/hidden/minimised (the Page Visibility API is disabled by backgroundThrottling:false). */
+    onVisibility: (cb: (visible: boolean) => void) => Unsubscribe;
   };
   log: (entry: LogEntry) => void;
   store: {

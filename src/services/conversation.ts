@@ -1,7 +1,7 @@
 /**
  * Conversation orchestrator: sends user input to Hermes through the resolved transport,
- * streams the answer into the chat store, drives the HUD state, speaks the reply and
- * surfaces approvals / clarifications as pending requests.
+ * streams the answer into the chat store (coalesced per animation frame), drives the HUD
+ * state, speaks the reply and surfaces approvals / clarifications as pending requests.
  */
 import type { HermesPushEvent } from '../../shared/ipc';
 import { Log } from '../lib/log';
@@ -17,6 +17,34 @@ let active: SendHandle | null = null;
 let activeMessageId: string | null = null;
 
 const toolLabel = (name: string) => name.replace(/_/g, ' ');
+
+// ── delta coalescing: one store update per animation frame ─────────────────
+const pendingDelta = { id: '', content: '', reasoning: '', raf: 0 };
+
+function flushDelta(): void {
+  if (pendingDelta.raf) cancelAnimationFrame(pendingDelta.raf);
+  const { id, content, reasoning } = pendingDelta;
+  pendingDelta.id = '';
+  pendingDelta.content = '';
+  pendingDelta.reasoning = '';
+  pendingDelta.raf = 0;
+  if (!id) return;
+  const chat = useChat.getState();
+  if (content) chat.appendToMessage(id, content);
+  if (reasoning) chat.appendToMessage(id, reasoning, 'reasoning');
+}
+
+function queueDelta(id: string, text: string, field: 'content' | 'reasoning'): void {
+  if (pendingDelta.id && pendingDelta.id !== id) flushDelta();
+  pendingDelta.id = id;
+  pendingDelta[field] += text;
+  if (!pendingDelta.raf) pendingDelta.raf = requestAnimationFrame(flushDelta);
+}
+
+/** Bumps a counter the core reads to flash briefly (send, tool start, speech start). */
+export function pingCore(): void {
+  useChat.getState().ping();
+}
 
 function localToolContext() {
   const chat = useChat.getState();
@@ -49,7 +77,7 @@ function localToolContext() {
   };
 }
 
-function handleEvent(event: HermesStreamEvent, messageId: string, runIdRef: { id: string | null }): void {
+function handleEvent(event: HermesStreamEvent, messageId: string, runIdRef: { id: string | null }, timing: { firstToken: number | null; startedAt: number }): void {
   const chat = useChat.getState();
   switch (event.kind) {
     case 'run.started':
@@ -57,15 +85,20 @@ function handleEvent(event: HermesStreamEvent, messageId: string, runIdRef: { id
       chat.setSending(true, event.runId);
       break;
     case 'delta':
-      chat.appendToMessage(messageId, event.text);
+      if (timing.firstToken === null) {
+        timing.firstToken = Date.now() - timing.startedAt;
+        chat.setLatency(timing.firstToken);
+      }
+      queueDelta(messageId, event.text, 'content');
       speech.pushStream(event.text);
       break;
     case 'reasoning':
-      chat.appendToMessage(messageId, event.text, 'reasoning');
+      queueDelta(messageId, event.text, 'reasoning');
       break;
     case 'tool.start':
       chat.pushActivity({ id: event.id, kind: 'tool', name: event.name, status: 'running', detail: event.args ? previewText(event.args, 160) : undefined });
       chat.setHud('thinking');
+      pingCore();
       break;
     case 'tool.progress':
       if (!chat.activity.some((a) => (event.id && a.id === event.id) || (a.name === event.name && a.status === 'running'))) {
@@ -113,6 +146,7 @@ function handleEvent(event: HermesStreamEvent, messageId: string, runIdRef: { id
       break;
     case 'completed':
       if (event.usage) chat.updateMessage(messageId, { usage: event.usage });
+      if (event.status === 'length') chat.updateMessage(messageId, { status: 'cancelled' });
       break;
     case 'error':
       chat.setError(event.message);
@@ -127,7 +161,8 @@ function addPending(request: Omit<PendingRequest, 'id' | 'createdAt'>): void {
   const chat = useChat.getState();
   chat.addPending(request);
   chat.setHud('alert');
-  speech.say(request.kind === 'approval' ? 'Autorisation requise.' : request.kind === 'clarify' ? request.description : 'Saisie requise.');
+  // Spoken without interrupting the streamed answer.
+  speech.say(request.kind === 'approval' ? 'Autorisation requise.' : request.kind === 'clarify' ? request.description : 'Saisie requise.', { interrupt: false });
 }
 
 export async function sendMessage(text: string, images: string[] = [], source = 'eveflow'): Promise<void> {
@@ -139,6 +174,7 @@ export async function sendMessage(text: string, images: string[] = [], source = 
 
   speech.stop();
   chat.setError(null);
+  chat.setLatency(null);
   chat.addMessage({ role: 'user', content: trimmed || '(image)', images: images.length ? images : undefined, source, status: 'done' });
   const history = chat.messages
     .filter((m) => m.role !== 'system' && m.status !== 'error')
@@ -148,7 +184,9 @@ export async function sendMessage(text: string, images: string[] = [], source = 
   activeMessageId = messageId;
   chat.setSending(true);
   chat.setHud('thinking');
+  pingCore();
   const startedAt = Date.now();
+  const timing = { firstToken: null as number | null, startedAt };
   const runIdRef = { id: null as string | null };
 
   const client = hermes.client();
@@ -158,7 +196,7 @@ export async function sendMessage(text: string, images: string[] = [], source = 
       images,
       history,
       sessionId: settings.hermesSessionId,
-      onEvent: (event) => handleEvent(event, messageId, runIdRef),
+      onEvent: (event) => handleEvent(event, messageId, runIdRef, timing),
       localToolDefinitions: LOCAL_TOOL_DEFINITIONS,
       localToolExecutor: (name, args) => executeLocalTool(name, args, localToolContext())
     },
@@ -169,20 +207,26 @@ export async function sendMessage(text: string, images: string[] = [], source = 
 
   try {
     const reply = await handle.result;
-    const current = useChat.getState().messages.find((m) => m.id === messageId);
-    const finalText = reply || current?.content || '';
-    useChat.getState().updateMessage(messageId, { content: finalText, status: 'done' });
-    // Anything not streamed (non-delta transports) is spoken now.
-    if (settings.speech.autoSpeak) {
-      if (!current?.content && finalText) speech.say(finalText);
+    flushDelta();
+    const state = useChat.getState();
+    const current = state.messages.find((m) => m.id === messageId);
+    const streamedText = current?.content ?? '';
+    const finalText = handle.aborted ? streamedText : reply || streamedText;
+    const truncated = current?.status === 'cancelled';
+    state.updateMessage(messageId, { content: finalText || (handle.aborted ? '(interrompu)' : ''), status: handle.aborted || truncated ? 'cancelled' : 'done' });
+    if (handle.aborted) {
+      speech.discardStream();
+    } else if (settings.speech.autoSpeak) {
+      if (!streamedText && finalText) speech.say(finalText);
       else speech.endStream();
     } else {
       speech.discardStream();
     }
-    useChat.getState().setHud(speech.isSpeaking() ? 'speaking' : 'idle');
-    if (useHermes.getState().link === 'offline') useHermes.getState().connect().catch(() => undefined);
-    Log.info('hermes', `reply in ${Date.now() - startedAt} ms via ${handle.transport}`, { chars: finalText.length });
+    state.setHud(speech.isSpeaking() ? 'speaking' : 'idle');
+    if (!handle.aborted && useHermes.getState().link === 'offline') useHermes.getState().connect().catch(() => undefined);
+    Log.info('hermes', `${handle.aborted ? 'aborted' : 'reply'} in ${Date.now() - startedAt} ms via ${handle.transport}`, { chars: finalText.length, firstToken: timing.firstToken });
   } catch (err) {
+    flushDelta();
     const message = (err as Error).message || String(err);
     const partial = useChat.getState().messages.find((m) => m.id === messageId)?.content ?? '';
     useChat.getState().updateMessage(messageId, {
@@ -200,10 +244,14 @@ export async function sendMessage(text: string, images: string[] = [], source = 
   } finally {
     active = null;
     activeMessageId = null;
-    useChat.getState().setSending(false);
-    for (const a of useChat.getState().activity) {
-      if (a.status === 'running') useChat.getState().finishActivity({ id: a.id }, { status: 'done' });
+    const state = useChat.getState();
+    state.setSending(false);
+    state.setLatency(null);
+    for (const a of state.activity) {
+      if (a.status === 'running') state.finishActivity({ id: a.id }, { status: 'done' });
     }
+    // Requests bound to this run cannot be answered once it is over.
+    for (const p of state.pending) if (!runIdRef.id || p.runId === runIdRef.id) state.removePending(p.id);
   }
 }
 
@@ -235,14 +283,13 @@ export async function resolvePending(request: PendingRequest, decision: string):
   chat.removePending(request.id);
   const client = useHermes.getState().client();
   try {
+    if (!request.runId) throw new Error('run inconnu');
     if (request.kind === 'approval') {
       const choice = (['once', 'session', 'always', 'deny'].includes(decision) ? decision : decision === 'approve' ? 'once' : 'deny') as 'once' | 'session' | 'always' | 'deny';
-      if (!request.runId) throw new Error('run inconnu');
       await client.approveRun(request.runId, choice, request.requestId || undefined);
       chat.addMessage({ role: 'system', content: `Autorisation ${choice === 'deny' ? 'refusée' : 'accordée'}${request.tool ? ` (${toolLabel(request.tool)})` : ''}.`, status: 'done' });
     } else {
       // Clarifications and secrets are answered by steering the run with the reply.
-      if (!request.runId) throw new Error('run inconnu');
       await client.steerRun(request.runId, decision);
       chat.addMessage({ role: 'system', content: request.secret ? 'Saisie transmise à Hermes.' : `Réponse transmise : ${decision}`, status: 'done' });
     }
@@ -278,6 +325,7 @@ export function handlePush(event: HermesPushEvent): void {
     speech.say(event.jobName ? `Résultat de ${event.jobName}. ${event.text}` : event.text);
   }
   chat.setHud(event.status?.includes('fail') ? 'alert' : 'success');
+  pingCore();
   setTimeout(() => {
     const s = useChat.getState();
     if (s.hud === 'success' || s.hud === 'alert') s.setHud(speech.isSpeaking() ? 'speaking' : 'idle');

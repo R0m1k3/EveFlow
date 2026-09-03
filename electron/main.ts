@@ -2,17 +2,19 @@ import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, session
 import path from 'node:path';
 import { IPC, type AppInfo, type HotkeyEvent, type LogEntry, type WindowMode } from '../shared/ipc';
 import { getLogPath, log, writeLog } from './logger';
-import { registerStoreIpc, storeGet } from './ipc/store';
+import { flushStore, registerStoreIpc, storeGet } from './ipc/store';
 import { abortAllStreams, registerHttpIpc } from './ipc/http';
 import { registerTelemetryIpc } from './ipc/telemetry';
 import { getSharedDirectory, registerFilesIpc } from './ipc/files';
-import { createMainWindow, getMainWindow, getWindowMode, setWindowMode, toggleWindowVisibility } from './window';
+import { createMainWindow, getMainWindow, getWindowMode, setWindowMode, toggleWindowVisibility, windowEvents } from './window';
 import { getWebhookStatus, startWebhookServer, stopWebhookServer } from './webhook';
 import { registerVoiceIpc } from './voice/ipc';
 import { stopEngine } from './voice/engine';
 
 // Audio playback must never be blocked behind a user gesture (TTS starts on incoming events).
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+// Test/dev aid: isolate settings, logs and models in a custom directory.
+if (process.env.EVEFLOW_USER_DATA) app.setPath('userData', process.env.EVEFLOW_USER_DATA);
 
 let tray: Tray | null = null;
 
@@ -37,8 +39,9 @@ interface WebhookSettings {
 }
 
 function readWebhookSettings(): WebhookSettings {
-  const saved = storeGet<WebhookSettings>('webhook');
-  return { enabled: true, port: 7842, secret: '', ...(saved ?? {}) };
+  const saved = storeGet<WebhookSettings>('webhook') ?? {};
+  const port = Number(saved.port);
+  return { enabled: saved.enabled !== false, port: Number.isInteger(port) && port > 0 && port < 65536 ? port : 7842, secret: typeof saved.secret === 'string' ? saved.secret : '' };
 }
 
 async function bootWebhook(): Promise<void> {
@@ -47,7 +50,7 @@ async function bootWebhook(): Promise<void> {
     await stopWebhookServer();
     return;
   }
-  await startWebhookServer(getMainWindow, { port: Number(settings.port) || 7842, secret: settings.secret || undefined });
+  await startWebhookServer(getMainWindow, { port: settings.port ?? 7842, secret: settings.secret || undefined });
 }
 
 function sendHotkey(event: HotkeyEvent): void {
@@ -63,7 +66,8 @@ function registerShortcuts(): void {
       sendHotkey('ptt-toggle');
     }],
     ['CommandOrControl+Shift+J', () => toggleWindowVisibility()],
-    ['CommandOrControl+Shift+Escape', () => sendHotkey('stop-speaking')]
+    // Ctrl+Shift+Escape is the Windows Task Manager shortcut; use a free combination.
+    ['CommandOrControl+Alt+Escape', () => sendHotkey('stop-speaking')]
   ];
   for (const [accelerator, handler] of bindings) {
     try {
@@ -96,7 +100,7 @@ function createTray(): void {
     };
     rebuildMenu();
     tray.on('click', () => toggleWindowVisibility());
-    ipcMain.on(IPC.windowSetMode, () => setTimeout(rebuildMenu, 0));
+    windowEvents.on('mode', rebuildMenu);
   } catch (err) {
     log('WARN', 'tray', `tray unavailable: ${(err as Error).message}`);
   }
@@ -127,7 +131,10 @@ function registerCoreIpc(): void {
     }
   });
   ipcMain.on(IPC.windowSetMode, (_e, mode: WindowMode) => setWindowMode(mode === 'compact' ? 'compact' : 'hud'));
-  ipcMain.on(IPC.log, (_e, entry: LogEntry) => writeLog(entry));
+  ipcMain.on(IPC.log, (_e, entry: LogEntry) => {
+    if (!entry || typeof entry.message !== 'string') return;
+    writeLog({ ...entry, message: entry.message.slice(0, 8000), tag: String(entry.tag).slice(0, 64) });
+  });
   ipcMain.handle(IPC.appInfo, (): AppInfo => ({
     version: app.getVersion(),
     platform: process.platform,
@@ -143,7 +150,7 @@ function registerCoreIpc(): void {
   });
 }
 
-app.whenReady().then(async () => {
+async function boot(): Promise<void> {
   log('INFO', 'app', `EveFlow ${app.getVersion()} starting (electron ${process.versions.electron}, chrome ${process.versions.chrome})`);
   configureSession();
   registerStoreIpc();
@@ -160,13 +167,19 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
   });
-});
+}
 
-app.on('will-quit', () => {
+if (app.hasSingleInstanceLock()) {
+  app.whenReady().then(boot).catch((err) => log('ERROR', 'app', `boot failed: ${(err as Error).message}`));
+}
+
+app.on('will-quit', (event) => {
   globalShortcut.unregisterAll();
   abortAllStreams();
   stopEngine();
   void stopWebhookServer();
+  event.preventDefault();
+  flushStore().finally(() => app.exit(0));
 });
 
 app.on('window-all-closed', () => {

@@ -88,6 +88,7 @@ export class MicCapture {
   private active = false;
   private options: CaptureOptions | null = null;
   private sampleRate = 16_000;
+  private hadSpeech = false;
 
   get isActive(): boolean {
     return this.active;
@@ -98,6 +99,7 @@ export class MicCapture {
     this.options = options;
     this.chunks = [];
     this.totalSamples = 0;
+    this.hadSpeech = false;
     this.vad = options.mode === 'auto' ? new EnergyVad(options.vad ?? DEFAULT_VAD) : null;
 
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -169,6 +171,12 @@ export class MicCapture {
     if (!this.active || !this.options) return;
     this.chunks.push(samples);
     this.totalSamples += samples.length;
+    // Before speech starts only a short pre-roll (~400 ms) is kept, so silence is never shipped to STT.
+    if (this.vad && !this.hadSpeech) {
+      while (this.chunks.length > 1 && this.totalSamples - this.chunks[0].length > this.sampleRate * 0.4) {
+        this.totalSamples -= this.chunks.shift()!.length;
+      }
+    }
     const level = rms(samples);
     this.options.callbacks.onLevel?.(Math.min(1, level * 6));
 
@@ -184,6 +192,7 @@ export class MicCapture {
   private handleVad(signal: VadSignal): void {
     switch (signal) {
       case 'speech-start':
+        this.hadSpeech = true;
         this.options?.callbacks.onSpeechStart?.();
         break;
       case 'speech-end':
@@ -222,10 +231,12 @@ export class MicCapture {
   /** Stop capture. In manual mode this finalises the utterance; otherwise reports the reason. */
   stop(reason: 'stopped' | 'no-speech' | 'too-short' = 'stopped'): void {
     if (!this.active) return;
-    if (reason === 'stopped') {
+    // Manual stop: transcribe only if something was actually said (or no VAD is running).
+    if (reason === 'stopped' && (!this.vad || this.hadSpeech)) {
       this.finishUtterance('stopped');
       return;
     }
+    if (reason === 'stopped') reason = 'no-speech';
     const opts = this.options;
     this.teardown();
     opts?.callbacks.onEnd(reason);

@@ -1,4 +1,5 @@
 import { app, BrowserWindow, screen, shell } from 'electron';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { IPC, type WindowMode } from '../shared/ipc';
@@ -9,6 +10,9 @@ const COMPACT_SIZE = { width: 380, height: 620, minWidth: 320, minHeight: 420 };
 
 let mainWindow: BrowserWindow | null = null;
 let currentMode: WindowMode = 'hud';
+export const windowEvents = new EventEmitter();
+// Transparent frameless windows cannot be resized reliably on Windows; use an opaque, rounded window there.
+const TRANSPARENT = process.platform !== 'win32';
 let hudBounds: Electron.Rectangle | null = null;
 
 export function getMainWindow(): BrowserWindow | null {
@@ -49,8 +53,9 @@ export function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
     ...HUD_SIZE,
     frame: false,
-    transparent: true,
-    backgroundColor: '#00000000',
+    transparent: TRANSPARENT,
+    backgroundColor: TRANSPARENT ? '#00000000' : '#03070d',
+    roundedCorners: true,
     hasShadow: true,
     show: false,
     title: 'EveFlow',
@@ -78,11 +83,18 @@ export function createMainWindow(): BrowserWindow {
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith('file://') && !url.startsWith(process.env.VITE_DEV_SERVER_URL ?? 'http://127.0.0.1:5173')) {
-      event.preventDefault();
-      void shell.openExternal(url);
-    }
+    if (url === win.webContents.getURL()) return;
+    event.preventDefault();
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
   });
+  win.webContents.on('will-redirect', (event) => event.preventDefault());
+  const notifyVisibility = () => {
+    if (!win.isDestroyed()) win.webContents.send(IPC.windowVisibility, win.isVisible() && !win.isMinimized());
+  };
+  win.on('show', notifyVisibility);
+  win.on('hide', notifyVisibility);
+  win.on('minimize', notifyVisibility);
+  win.on('restore', notifyVisibility);
 
   win.on('closed', () => {
     mainWindow = null;
@@ -129,6 +141,7 @@ export function setWindowMode(mode: WindowMode): void {
   }
   currentMode = mode;
   win.webContents.send(IPC.windowModeChanged, mode);
+  windowEvents.emit('mode', mode);
 }
 
 export function toggleWindowVisibility(): void {

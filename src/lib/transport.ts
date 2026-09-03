@@ -130,8 +130,3 @@ export async function httpStream(req: HttpProxyRequest, handlers: StreamHandlers
   return { start, done, abort: () => controller.abort() };
 }
 
-/** Collects the whole body of a streaming response (used to read error payloads). */
-export async function collectStreamBody(handle: StreamHandle, first: string[]): Promise<string> {
-  await handle.done.catch(() => undefined);
-  return first.join('');
-}
