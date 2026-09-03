@@ -16,6 +16,9 @@ export interface VoiceSettings extends SttConfig {
   silenceMs: number;
   sensitivity: number; // 1 (low) .. 5 (high)
   wakeChime: boolean;
+  /** Hands-free: only react to utterances starting with this word (local STT recommended). */
+  wakeWordEnabled: boolean;
+  wakeWord: string;
 }
 
 export interface SpeechSettings extends TtsConfig {
@@ -77,7 +80,10 @@ export const DEFAULT_SETTINGS: Settings = {
     micDeviceId: '',
     silenceMs: 900,
     sensitivity: 3,
-    wakeChime: true
+    wakeChime: true,
+    wakeWordEnabled: false,
+    wakeWord: 'jarvis',
+    localModel: 'whisper-base'
   },
   speech: {
     provider: 'openai-compatible',
@@ -90,6 +96,8 @@ export const DEFAULT_SETTINGS: Settings = {
     systemVoice: '',
     language: 'fr-FR',
     volume: 1,
+    localModel: 'kokoro-v1',
+    localSpeaker: 30,
     autoSpeak: true,
     speakIncoming: true
   },

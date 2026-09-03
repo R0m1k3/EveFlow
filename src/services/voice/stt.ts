@@ -1,7 +1,8 @@
 import { Log } from '../../lib/log';
+import { bridge } from '../../lib/bridge';
 import { httpFetch } from '../../lib/transport';
 
-export type SttProvider = 'openai-compatible' | 'browser';
+export type SttProvider = 'openai-compatible' | 'browser' | 'local';
 
 export interface SttConfig {
   provider: SttProvider;
@@ -10,6 +11,8 @@ export interface SttConfig {
   model: string;
   language: string; // BCP-47, e.g. fr-FR
   prompt?: string;
+  /** Catalog id of the local sherpa-onnx model (provider 'local'). */
+  localModel: string;
 }
 
 export function sttEndpoint(apiUrl: string): string {
@@ -20,8 +23,20 @@ export function sttEndpoint(apiUrl: string): string {
   return `${base}/v1/audio/transcriptions`;
 }
 
-/** Transcribe a WAV buffer through any OpenAI-compatible `/v1/audio/transcriptions` endpoint. */
+/** Transcribe with the in-app sherpa-onnx engine (runs in the Electron main process). */
+export async function transcribeLocal(wav: Uint8Array, config: SttConfig): Promise<string> {
+  const api = bridge();
+  if (!api) throw new Error('La reconnaissance locale nécessite l’application Electron.');
+  if (!config.localModel) throw new Error('Aucun modèle de reconnaissance local sélectionné.');
+  const started = Date.now();
+  const result = await api.voice.transcribe({ modelId: config.localModel, wav, language: config.language.split('-')[0] || 'auto' });
+  Log.info('stt', `local transcription in ${Date.now() - started} ms (engine ${result.durationMs} ms, audio ${result.audioSec.toFixed(1)}s)`);
+  return result.text.trim();
+}
+
+/** Transcribe a WAV buffer with the configured provider. */
 export async function transcribeWav(wav: Uint8Array, config: SttConfig): Promise<string> {
+  if (config.provider === 'local') return transcribeLocal(wav, config);
   if (!config.apiUrl.trim()) throw new Error("URL de l'API de transcription non configurée.");
   const endpoint = sttEndpoint(config.apiUrl);
   const fields: Record<string, string> = {

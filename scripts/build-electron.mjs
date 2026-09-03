@@ -7,13 +7,18 @@ import { rmSync } from 'node:fs';
 rmSync('dist-electron', { recursive: true, force: true });
 
 await build({
-  entryPoints: ['electron/main.ts', 'electron/preload.ts'],
+  entryPoints: {
+    main: 'electron/main.ts',
+    preload: 'electron/preload.ts',
+    'voice-worker': 'electron/voice/worker.ts'
+  },
   outdir: 'dist-electron',
   bundle: true,
   platform: 'node',
   format: 'cjs',
   target: 'node22',
-  external: ['electron'],
+  // sherpa-onnx-node stays external: it is a native addon shipped unpacked from the asar.
+  external: ['electron', 'sherpa-onnx-node'],
   sourcemap: false,
   logLevel: 'info'
 });

@@ -4,11 +4,12 @@
  * and the legacy Google Translate endpoint (no key, online only).
  */
 import { Log } from '../../lib/log';
+import { bridge } from '../../lib/bridge';
 import { chunkForSpeech, cleanForSpeech, extractSentences } from '../../lib/text';
 import { httpFetch } from '../../lib/transport';
 import { audioBus } from './audioBus';
 
-export type TtsProvider = 'openai-compatible' | 'system' | 'google-free' | 'off';
+export type TtsProvider = 'openai-compatible' | 'system' | 'google-free' | 'local' | 'off';
 
 export interface TtsConfig {
   provider: TtsProvider;
@@ -21,6 +22,10 @@ export interface TtsConfig {
   systemVoice: string;
   language: string;
   volume: number;
+  /** Catalog id of the local sherpa-onnx voice model (provider 'local'). */
+  localModel: string;
+  /** Speaker id inside the local model. */
+  localSpeaker: number;
 }
 
 export type TtsState = 'idle' | 'loading' | 'speaking';
@@ -159,7 +164,8 @@ export class TtsEngine {
   }
 
   private prefetch(text: string, gen: number): Promise<AudioBuffer | null> {
-    const task = this.config.provider === 'google-free' ? this.fetchGoogle(text) : this.fetchOpenAi(text);
+    const task =
+      this.config.provider === 'google-free' ? this.fetchGoogle(text) : this.config.provider === 'local' ? this.fetchLocal(text) : this.fetchOpenAi(text);
     return task
       .then(async (bytes) => {
         if (gen !== this.generation || !bytes) return null;
@@ -197,6 +203,20 @@ export class TtsEngine {
       throw new Error(`HTTP ${res.status} ${body}`);
     }
     return res.binary;
+  }
+
+  private async fetchLocal(text: string): Promise<Uint8Array> {
+    const api = bridge();
+    if (!api) throw new Error('La synthèse locale nécessite l’application Electron.');
+    if (!this.config.localModel) throw new Error('Aucun modèle de voix local sélectionné.');
+    const result = await api.voice.synthesize({
+      modelId: this.config.localModel,
+      text,
+      speaker: this.config.localSpeaker,
+      speed: Math.max(0.5, Math.min(2, this.config.speed || 1))
+    });
+    Log.debug('tts', `local synthesis ${result.durationMs} ms for ${result.audioSec.toFixed(1)}s of audio`);
+    return result.wav;
   }
 
   private async fetchGoogle(text: string): Promise<Uint8Array> {

@@ -10,6 +10,7 @@ import { useChat } from './state/chat';
 import { useHermes } from './state/hermes';
 import { useSettings } from './state/settings';
 import { useVoice } from './state/voice';
+import { useVoiceModels } from './state/voiceModels';
 import { ChatPanel } from './components/chat/ChatPanel';
 import { PendingRequests } from './components/chat/PendingRequests';
 import { CompactWidget } from './components/compact/CompactWidget';
@@ -41,6 +42,8 @@ function useBoot(): boolean {
         Log.error('app', 'window.eveflow missing inside Electron');
       }
       if (api) {
+        disposers.push(useVoiceModels.getState().subscribe());
+        void useVoiceModels.getState().refresh();
         disposers.push(api.hermes.onPush(handlePush));
         disposers.push(
           api.hotkeys.on((event) => {

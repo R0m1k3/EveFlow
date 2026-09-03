@@ -10,8 +10,10 @@ import { encodeWav } from '../../services/voice/wav';
 import { useHermes } from '../../state/hermes';
 import { DEFAULT_SETTINGS, useSettings, type HudTheme } from '../../state/settings';
 import { useVoice } from '../../state/voice';
+import { installedModels, useVoiceModels } from '../../state/voiceModels';
+import { ModelsSection } from './ModelsSection';
 
-type Section = 'general' | 'hermes' | 'voice' | 'speech' | 'webhook' | 'ui';
+type Section = 'general' | 'hermes' | 'voice' | 'speech' | 'models' | 'webhook' | 'ui';
 
 interface Props {
   onClose: () => void;
@@ -37,6 +39,8 @@ export function SettingsDrawer({ onClose }: Props) {
   const reset = useSettings((s) => s.reset);
   const hermesStore = useHermes();
   const micDevices = useVoice((s) => s.micDevices);
+  const voiceModels = useVoiceModels((s) => s.models);
+  const refreshModels = useVoiceModels((s) => s.refresh);
   const [section, setSection] = useState<Section>('hermes');
   const [hermesTest, setHermesTest] = useState<TestState>({ status: 'idle', message: '' });
   const [sttTest, setSttTest] = useState<TestState>({ status: 'idle', message: '' });
@@ -49,8 +53,9 @@ export function SettingsDrawer({ onClose }: Props) {
     refresh();
     speechSynthesis.addEventListener?.('voiceschanged', refresh);
     void listMicrophones().then((d) => useVoice.getState().setMicDevices(d));
+    void refreshModels();
     return () => speechSynthesis.removeEventListener?.('voiceschanged', refresh);
-  }, []);
+  }, [refreshModels]);
 
   const testHermes = async () => {
     setHermesTest({ status: 'running', message: 'connexion…' });
@@ -113,6 +118,7 @@ export function SettingsDrawer({ onClose }: Props) {
     ['hermes', 'Hermes'],
     ['voice', 'Micro / STT'],
     ['speech', 'Voix / TTS'],
+    ['models', 'Modèles locaux'],
     ['webhook', 'Webhook'],
     ['general', 'Général'],
     ['ui', 'Interface']
@@ -195,10 +201,23 @@ export function SettingsDrawer({ onClose }: Props) {
             <div className="field">
               <label>Moteur de reconnaissance</label>
               <select className="select" value={settings.voice.provider} onChange={(e) => update({ voice: { provider: e.target.value as typeof settings.voice.provider } })}>
+                <option value="local">Local dans l’application (Whisper via sherpa-onnx, hors ligne)</option>
                 <option value="openai-compatible">API compatible OpenAI (Qwen3-ASR, Whisper, Speaches, LocalAI…)</option>
                 <option value="browser">Reconnaissance Chromium (en ligne, secours)</option>
               </select>
             </div>
+            {settings.voice.provider === 'local' && (
+              <div className="field">
+                <label>Modèle local</label>
+                {installedModels(voiceModels, 'stt').length === 0 ? (
+                  <span className="hint">Aucun modèle installé. <a href="#" onClick={(e) => { e.preventDefault(); setSection('models'); }}>Téléchargez Whisper base dans « Modèles locaux »</a>.</span>
+                ) : (
+                  <select className="select" value={settings.voice.localModel} onChange={(e) => update({ voice: { localModel: e.target.value } })}>
+                    {installedModels(voiceModels, 'stt').map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select>
+                )}
+              </div>
+            )}
             {settings.voice.provider === 'openai-compatible' && (
               <>
                 <div className="field">
@@ -255,8 +274,15 @@ export function SettingsDrawer({ onClose }: Props) {
             </div>
             <Toggle on={settings.voice.handsFree} onChange={(v) => { update({ voice: { handsFree: v } }); useVoice.getState().setHandsFree(v); }} label="Mains libres au démarrage" hint="Le micro se réactive automatiquement après chaque réponse." />
             <Toggle on={settings.voice.wakeChime} onChange={(v) => update({ voice: { wakeChime: v } })} label="Signal sonore d’écoute" />
+            <Toggle on={settings.voice.wakeWordEnabled} onChange={(v) => update({ voice: { wakeWordEnabled: v } })} label="Mot d’activation en mains libres" hint="Seules les phrases commençant par ce mot sont envoyées à Hermes ; le reste est ignoré. Recommandé avec la reconnaissance locale." />
+            {settings.voice.wakeWordEnabled && (
+              <div className="field" style={{ marginTop: 8 }}>
+                <label>Mot d’activation</label>
+                <input className="input" value={settings.voice.wakeWord} placeholder="jarvis" onChange={(e) => update({ voice: { wakeWord: e.target.value.toLowerCase() } })} />
+              </div>
+            )}
             <div className="row" style={{ marginTop: 10 }}>
-              <button className="btn small" onClick={() => void testStt()} disabled={settings.voice.provider !== 'openai-compatible'}><Mic size={13} /> Tester l’API STT</button>
+              <button className="btn small" onClick={() => void testStt()} disabled={settings.voice.provider === 'browser'}><Mic size={13} /> Tester la reconnaissance</button>
             </div>
             <div style={{ marginTop: 8 }}><Result t={sttTest} /></div>
           </div>
@@ -267,6 +293,7 @@ export function SettingsDrawer({ onClose }: Props) {
             <div className="field">
               <label>Moteur de synthèse</label>
               <select className="select" value={settings.speech.provider} onChange={(e) => update({ speech: { provider: e.target.value as typeof settings.speech.provider } })}>
+                <option value="local">Local dans l’application (Kokoro / Piper via sherpa-onnx, hors ligne)</option>
                 <option value="openai-compatible">API compatible OpenAI /v1/audio/speech (Kokoro, Piper, OpenAI, LocalAI…)</option>
                 <option value="system">Voix système Windows</option>
                 <option value="google-free">Google Translate (gratuit, en ligne)</option>
@@ -303,6 +330,33 @@ export function SettingsDrawer({ onClose }: Props) {
                 </div>
               </>
             )}
+            {settings.speech.provider === 'local' && (
+              installedModels(voiceModels, 'tts').length === 0 ? (
+                <div className="field">
+                  <span className="hint">Aucun modèle de voix installé. <a href="#" onClick={(e) => { e.preventDefault(); setSection('models'); }}>Téléchargez Kokoro dans « Modèles locaux »</a>.</span>
+                </div>
+              ) : (
+                <div className="grid-2">
+                  <div className="field">
+                    <label>Modèle local</label>
+                    <select className="select" value={settings.speech.localModel} onChange={(e) => {
+                      const m = voiceModels.find((x) => x.id === e.target.value);
+                      update({ speech: { localModel: e.target.value, localSpeaker: m?.speakers?.[0]?.id ?? 0 } });
+                    }}>
+                      {installedModels(voiceModels, 'tts').map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>Voix</label>
+                    <select className="select" value={settings.speech.localSpeaker} onChange={(e) => update({ speech: { localSpeaker: Number(e.target.value) } })}>
+                      {(voiceModels.find((m) => m.id === settings.speech.localModel)?.speakers ?? [{ id: 0, name: 'Voix 0', lang: '' }]).map((sp) => (
+                        <option key={sp.id} value={sp.id}>{sp.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )
+            )}
             {settings.speech.provider === 'system' && (
               <div className="field">
                 <label>Voix système</label>
@@ -330,6 +384,8 @@ export function SettingsDrawer({ onClose }: Props) {
             <div style={{ marginTop: 8 }}><Result t={ttsTest} /></div>
           </div>
         )}
+
+        {section === 'models' && <ModelsSection />}
 
         {section === 'webhook' && (
           <div className="card">
