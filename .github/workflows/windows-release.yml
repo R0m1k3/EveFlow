@@ -45,6 +45,8 @@ jobs:
         run: |
           version=$(node -p "require('./package.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          # Fourth component (hotfix number, e.g. 2.0.0.1) becomes the Windows file build number.
+          echo "build=$(echo "$version" | cut -d. -f4)" >> "$GITHUB_OUTPUT"
           if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
             echo "released=true" >> "$GITHUB_OUTPUT"
           else
@@ -55,6 +57,7 @@ jobs:
         run: npx electron-builder --win --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_NUMBER: ${{ steps.ver.outputs.build }}
       - uses: actions/upload-artifact@v4
         with:
           name: EveFlow-Windows-v${{ steps.ver.outputs.version }}

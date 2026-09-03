@@ -4,6 +4,8 @@ import { bridge } from '../lib/bridge';
 
 export interface LiveMetrics extends SystemMetrics {
   fps: number;
+  /** false until the main process delivered real measurements */
+  live: boolean;
 }
 
 const EMPTY: LiveMetrics = {
@@ -16,7 +18,8 @@ const EMPTY: LiveMetrics = {
   memUsedPct: 0,
   memTotalGb: 0,
   uptimeSec: 0,
-  fps: 60
+  fps: 60,
+  live: false
 };
 
 export function useMetrics(enabled = true, intervalMs = 2000): LiveMetrics {
@@ -43,7 +46,7 @@ export function useMetrics(enabled = true, intervalMs = 2000): LiveMetrics {
     const api = bridge();
     const poll = () => {
       if (!api) return;
-      api.system.metrics().then((m) => setMetrics((prev) => ({ ...prev, ...m }))).catch(() => undefined);
+      api.system.metrics().then((m) => setMetrics((prev) => ({ ...prev, ...m, live: true }))).catch(() => undefined);
     };
     poll();
     const timer = setInterval(poll, intervalMs);

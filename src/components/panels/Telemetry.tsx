@@ -28,11 +28,11 @@ export function Telemetry() {
         <Activity size={14} />
         <span>Système</span>
         <span className="spacer" />
-        <span className="chip">{m.hostname}</span>
+        <span className="chip">{m.live ? m.hostname : 'HORS PONT'}</span>
       </header>
       <div className="telemetry">
-        <Gauge value={m.cpuLoad} max={100} label="CPU" display={`${Math.round(m.cpuLoad)}%`} warn={90} />
-        <Gauge value={m.memUsedPct} max={100} label="RAM" display={`${Math.round(m.memUsedPct)}%`} warn={92} />
+        <Gauge value={m.cpuLoad} max={100} label="CPU" display={m.live ? `${Math.round(m.cpuLoad)}%` : '—'} warn={90} />
+        <Gauge value={m.memUsedPct} max={100} label="RAM" display={m.live ? `${Math.round(m.memUsedPct)}%` : '—'} warn={92} />
         <Gauge value={m.fps} max={60} label="FPS" display={`${m.fps}`} />
         <Gauge value={m.cpuFreqMhz} max={5500} label="GHz" display={m.cpuFreqMhz ? (m.cpuFreqMhz / 1000).toFixed(1) : '—'} />
       </div>
