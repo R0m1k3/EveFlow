@@ -39,6 +39,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Read version
+        id: ver
+        shell: bash
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
       - run: npm run build
       - name: Package Windows EXE
         run: npx electron-builder --win --publish never
@@ -46,16 +50,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
-          name: EveFlow-Windows-${{ github.ref_name }}
+          name: EveFlow-Windows-v${{ steps.ver.outputs.version }}
           path: |
             out/*.exe
             out/*.exe.blockmap
             out/latest.yml
           if-no-files-found: error
       - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: EveFlow ${{ steps.ver.outputs.version }}
+          generate_release_notes: true
           files: |
             out/*.exe
             out/*.exe.blockmap
