@@ -1,7 +1,7 @@
 /** Local voice engine contract (sherpa-onnx in a utility process). Shared by main and renderer. */
 
 export type VoiceModelKind = 'stt' | 'tts' | 'kws' | 'vad';
-export type VoiceEngineKind = 'whisper' | 'sense-voice' | 'nemo-transducer' | 'kokoro' | 'piper' | 'kws-transducer' | 'silero';
+export type VoiceEngineKind = 'whisper' | 'sense-voice' | 'nemo-transducer' | 'kokoro' | 'piper' | 'supertonic' | 'kws-transducer' | 'silero';
 
 export interface VoiceSpeaker {
   id: number;
@@ -62,6 +62,31 @@ export interface SynthesizeRequest {
   text: string;
   speaker: number;
   speed: number;
+  /** BCP-47 tag or 2-letter code of the text (multilingual engines such as Supertonic need it). */
+  language?: string;
+}
+
+/** Microsoft Edge "Read aloud" neural voices (online, no key). */
+export interface EdgeVoice {
+  /** e.g. fr-FR-HenriNeural */
+  shortName: string;
+  /** Display name, e.g. Henri */
+  name: string;
+  locale: string;
+  gender: 'm' | 'f';
+}
+
+export interface EdgeSynthesizeRequest {
+  text: string;
+  voice: string;
+  /** Playback speed multiplier (0.5 .. 2). */
+  speed: number;
+}
+
+export interface EdgeSynthesizeResult {
+  /** MP3, 24 kHz mono 48 kbit/s. */
+  mp3: Uint8Array;
+  durationMs: number;
 }
 
 export interface SynthesizeResult {
@@ -115,6 +140,8 @@ export const VOICE_IPC = {
   modelsProgress: 'voice:models:progress',
   transcribe: 'voice:transcribe',
   synthesize: 'voice:synthesize',
+  edgeSynthesize: 'voice:edge:synthesize',
+  edgeVoices: 'voice:edge:voices',
   unload: 'voice:unload',
   kwsStart: 'voice:kws:start',
   kwsStop: 'voice:kws:stop',

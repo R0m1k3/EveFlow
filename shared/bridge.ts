@@ -13,6 +13,9 @@ import type {
 } from './ipc';
 import type { McpToolRequest, McpToolResponse } from './ipc';
 import type {
+  EdgeSynthesizeRequest,
+  EdgeSynthesizeResult,
+  EdgeVoice,
   KwsDetection,
   KwsStartRequest,
   VadEvent,
@@ -75,6 +78,9 @@ export interface EveFlowBridge {
     onProgress: (cb: (progress: VoiceDownloadProgress) => void) => Unsubscribe;
     transcribe: (req: TranscribeRequest) => Promise<TranscribeResult>;
     synthesize: (req: SynthesizeRequest) => Promise<SynthesizeResult>;
+    /** Microsoft Edge neural voices (online, free): MP3 for one sentence. */
+    edgeSynthesize: (req: EdgeSynthesizeRequest) => Promise<EdgeSynthesizeResult>;
+    edgeVoices: () => Promise<EdgeVoice[]>;
     unload: (id?: string) => Promise<unknown>;
     kwsStart: (req: KwsStartRequest) => Promise<{ accepted: string[]; rejected: string[] }>;
     kwsStop: () => Promise<void>;

@@ -6,6 +6,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import type { VoiceEngineKind } from '../../shared/voice';
+import { SUPERTONIC_LANGS } from './catalog';
 
 interface ModelRef {
   id: string;
@@ -17,7 +18,7 @@ interface ModelRef {
 type Request =
   | { id: number; type: 'status' }
   | { id: number; type: 'transcribe'; model: ModelRef; wav: Uint8Array | string; language: string }
-  | { id: number; type: 'synthesize'; model: ModelRef; text: string; speaker: number; speed: number }
+  | { id: number; type: 'synthesize'; model: ModelRef; text: string; speaker: number; speed: number; language?: string }
   | { id: number; type: 'unload'; modelId?: string }
   | { id: number; type: 'kws.start'; model: ModelRef; keywordsFile: string; threshold: number; score: number }
   | { id: number; type: 'kws.audio'; pcm: string; sampleRate: number }
@@ -55,8 +56,10 @@ type Sherpa = {
   OfflineTts: new (config: unknown) => {
     numSpeakers: number;
     sampleRate: number;
-    generate: (req: { text: string; sid: number; speed: number; enableExternalBuffer?: boolean }) => { samples: Float32Array; sampleRate: number };
+    generate: (req: { text: string; sid: number; speed: number; enableExternalBuffer?: boolean; generationConfig?: unknown }) => { samples: Float32Array; sampleRate: number };
   };
+  /** Per-request options for the newer engines (Supertonic reads `extra.lang`). */
+  GenerationConfig: new (opts: { sid: number; speed: number; numSteps?: number; extra?: Record<string, string | number> }) => unknown;
   version: string;
 };
 
@@ -152,12 +155,31 @@ function getSynthesizer(model: ModelRef) {
       ttsModel = { vits: { model: p(onnx), tokens: p('tokens.txt'), dataDir: p('espeak-ng-data') } };
       break;
     }
+    case 'supertonic':
+      ttsModel = {
+        supertonic: {
+          durationPredictor: p('duration_predictor.int8.onnx'),
+          textEncoder: p('text_encoder.int8.onnx'),
+          vectorEstimator: p('vector_estimator.int8.onnx'),
+          vocoder: p('vocoder.int8.onnx'),
+          ttsJson: p('tts.json'),
+          unicodeIndexer: p('unicode_indexer.bin'),
+          voiceStyle: p('voice.bin')
+        }
+      };
+      break;
     default:
       throw new Error(`Moteur TTS non supporté : ${model.engine}`);
   }
   const tts = new s.OfflineTts({ model: { ...ttsModel, numThreads: threads, provider: 'cpu', debug: 0 }, maxNumSentences: 1 });
   synthesizers.set(model.id, tts);
   return tts;
+}
+
+/** 2-letter code accepted by Supertonic 3 ("fr-FR" → "fr"); English when unknown, as upstream does. */
+function supertonicLang(language: string | undefined): string {
+  const code = (language ?? '').toLowerCase().split(/[-_]/)[0];
+  return SUPERTONIC_LANGS.has(code) ? code : 'en';
 }
 
 // ── audio helpers ──────────────────────────────────────────────────────────
@@ -397,8 +419,19 @@ function handle(req: Request): unknown {
       const started = Date.now();
       const tts = getSynthesizer(req.model);
       const sid = Math.max(0, Math.min(tts.numSpeakers - 1, Math.floor(req.speaker)));
+      const speed = Math.max(0.5, Math.min(2, req.speed || 1));
       // Electron forbids N-API external buffers: ask sherpa-onnx to copy the samples into a V8 buffer.
-      const audio = tts.generate({ text: req.text, sid, speed: Math.max(0.5, Math.min(2, req.speed || 1)), enableExternalBuffer: false });
+      const audio =
+        req.model.engine === 'supertonic'
+          ? tts.generate({
+              text: req.text,
+              sid,
+              speed,
+              enableExternalBuffer: false,
+              // Supertonic needs the language of the text; 5 denoising steps is the quality/speed sweet spot.
+              generationConfig: new (loadSherpa().GenerationConfig)({ sid, speed, numSteps: 5, extra: { lang: supertonicLang(req.language) } })
+            })
+          : tts.generate({ text: req.text, sid, speed, enableExternalBuffer: false });
       const wav = encodeWav(audio.samples, audio.sampleRate);
       return {
         wav: Buffer.from(wav.buffer, wav.byteOffset, wav.byteLength).toString('base64'),

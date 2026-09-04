@@ -26,6 +26,8 @@ export interface VoiceSettings extends SttConfig {
   neuralVad: boolean;
   /** Execute short system intents locally (lock, volume, open app…) instead of asking Hermes. */
   localCommands: boolean;
+  /** Chromium mic processing (echo cancellation, noise suppression, auto gain). Off often transcribes better on a headset. */
+  micProcessing: boolean;
 }
 
 export interface SpeechSettings extends TtsConfig {
@@ -110,10 +112,12 @@ export const DEFAULT_SETTINGS: Settings = {
     kwsSensitivity: 3,
     neuralVad: true,
     localCommands: true,
+    micProcessing: true,
     localModel: 'whisper-base'
   },
   speech: {
-    provider: 'openai-compatible',
+    // Edge neural voices speak out of the box (no server, no key) with a real masculine/feminine choice.
+    provider: 'edge',
     apiUrl: 'http://127.0.0.1:8000/v1',
     apiKey: '',
     model: 'tts-1',
@@ -123,8 +127,9 @@ export const DEFAULT_SETTINGS: Settings = {
     systemVoice: '',
     language: 'fr-FR',
     volume: 1,
-    localModel: 'kokoro-v1',
-    localSpeaker: 30,
+    localModel: 'supertonic-3',
+    localSpeaker: 6,
+    edgeVoice: '',
     voiceGender: 'male',
     timbre: 'jarvis',
     autoSpeak: true,

@@ -3,6 +3,7 @@ import { Download, Trash2, X, CheckCircle2, Cpu, Mic, Volume2, AlertTriangle, Re
 import type { VoiceModelStatus } from '../../../shared/voice';
 import { bridge } from '../../lib/bridge';
 import { useShallow } from 'zustand/react/shallow';
+import { pickSpeaker } from '../../lib/voicePreference';
 import { useVoiceModels } from '../../state/voiceModels';
 import { useSettings } from '../../state/settings';
 
@@ -24,7 +25,10 @@ function ModelRow({ model }: { model: VoiceModelStatus }) {
     if (model.kind === 'stt') update({ voice: { localModel: model.id, provider: 'local' } });
     else if (model.kind === 'kws') update({ voice: { wakeMode: 'kws' } });
     else if (model.kind === 'vad') update({ voice: { neuralVad: true } });
-    else update({ speech: { localModel: model.id, provider: 'local', localSpeaker: model.speakers?.[0]?.id ?? 0 } });
+    else {
+      const { speech } = useSettings.getState().settings;
+      update({ speech: { localModel: model.id, provider: 'local', localSpeaker: pickSpeaker(model, speech.language || 'fr-FR', speech.voiceGender ?? 'male') } });
+    }
   };
   const neuralVad = useSettings((s) => s.settings.voice.neuralVad);
   const activeNow = model.kind === 'kws' ? wakeMode === 'kws' : model.kind === 'vad' ? neuralVad : isActive;

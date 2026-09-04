@@ -15,7 +15,7 @@ import {
 } from '../shared/ipc';
 import type { EveFlowBridge, SystemAction, SystemActionResult, Unsubscribe } from '../shared/bridge';
 import type { McpToolRequest, McpToolResponse } from '../shared/ipc';
-import { VOICE_IPC, type KwsDetection, type KwsStartRequest, type VadEvent, type VadStartRequest, type SynthesizeRequest, type SynthesizeResult, type TranscribeRequest, type TranscribeResult, type VoiceDownloadProgress, type VoiceEngineStatus, type VoiceModelStatus } from '../shared/voice';
+import { VOICE_IPC, type EdgeSynthesizeRequest, type EdgeSynthesizeResult, type EdgeVoice, type KwsDetection, type KwsStartRequest, type VadEvent, type VadStartRequest, type SynthesizeRequest, type SynthesizeResult, type TranscribeRequest, type TranscribeResult, type VoiceDownloadProgress, type VoiceEngineStatus, type VoiceModelStatus } from '../shared/voice';
 
 function subscribe<T>(channel: string, callback: (payload: T) => void): Unsubscribe {
   const listener = (_event: Electron.IpcRendererEvent, payload: T) => callback(payload);
@@ -74,6 +74,8 @@ const api: EveFlowBridge = {
     onProgress: (cb: (progress: VoiceDownloadProgress) => void) => subscribe<VoiceDownloadProgress>(VOICE_IPC.modelsProgress, cb),
     transcribe: (req: TranscribeRequest) => ipcRenderer.invoke(VOICE_IPC.transcribe, req) as Promise<TranscribeResult>,
     synthesize: (req: SynthesizeRequest) => ipcRenderer.invoke(VOICE_IPC.synthesize, req) as Promise<SynthesizeResult>,
+    edgeSynthesize: (req: EdgeSynthesizeRequest) => ipcRenderer.invoke(VOICE_IPC.edgeSynthesize, req) as Promise<EdgeSynthesizeResult>,
+    edgeVoices: () => ipcRenderer.invoke(VOICE_IPC.edgeVoices) as Promise<EdgeVoice[]>,
     unload: (id?: string) => ipcRenderer.invoke(VOICE_IPC.unload, id) as Promise<unknown>,
     kwsStart: (req: KwsStartRequest) => ipcRenderer.invoke(VOICE_IPC.kwsStart, req) as Promise<{ accepted: string[]; rejected: string[] }>,
     kwsStop: () => ipcRenderer.invoke(VOICE_IPC.kwsStop) as Promise<void>,

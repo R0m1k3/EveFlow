@@ -49,6 +49,8 @@ export interface CaptureCallbacks {
 
 export interface CaptureOptions {
   deviceId?: string;
+  /** Chromium's echo cancellation / noise suppression / auto gain (default on). Off keeps the raw signal for the recogniser. */
+  micProcessing?: boolean;
   mode: CaptureMode;
   vad?: Partial<VadOptions>;
   callbacks: CaptureCallbacks;
@@ -124,9 +126,9 @@ export class MicCapture {
     const constraints: MediaStreamConstraints = {
       audio: {
         deviceId: options.deviceId ? { exact: options.deviceId } : undefined,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+        echoCancellation: options.micProcessing !== false,
+        noiseSuppression: options.micProcessing !== false,
+        autoGainControl: options.micProcessing !== false,
         channelCount: 1
       }
     };

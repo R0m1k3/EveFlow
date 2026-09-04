@@ -74,7 +74,7 @@ export class WakeListener {
     return this.phase;
   }
 
-  async start(options: { deviceId?: string; vad?: Partial<VadOptions>; neuralVad?: boolean; callbacks: WakeCallbacks }): Promise<void> {
+  async start(options: { deviceId?: string; micProcessing?: boolean; vad?: Partial<VadOptions>; neuralVad?: boolean; callbacks: WakeCallbacks }): Promise<void> {
     if (this.phase !== 'off') return;
     this.callbacks = options.callbacks;
     this.vadOptions = options.vad ?? {};
@@ -86,9 +86,9 @@ export class WakeListener {
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         deviceId: options.deviceId ? { exact: options.deviceId } : undefined,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+        echoCancellation: options.micProcessing !== false,
+        noiseSuppression: options.micProcessing !== false,
+        autoGainControl: options.micProcessing !== false,
         channelCount: 1
       }
     });

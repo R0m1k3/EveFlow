@@ -1,7 +1,7 @@
 # EveFlow 2 — Interface vocale JARVIS pour Hermes Agent
 
 [![Build](https://img.shields.io/github/actions/workflow/status/R0m1k3/EveFlow/windows-release.yml?style=flat-square)](https://github.com/R0m1k3/EveFlow/actions)
-[![Version](https://img.shields.io/badge/version-2.4.1-brightgreen.svg?style=flat-square)](https://github.com/R0m1k3/EveFlow/releases)
+[![Version](https://img.shields.io/badge/version-2.5.0-brightgreen.svg?style=flat-square)](https://github.com/R0m1k3/EveFlow/releases)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey.svg?style=flat-square)](LICENSE)
 
 **EveFlow** est un compagnon de bureau Windows qui transforme [Hermes Agent](https://hermes-agent.nousresearch.com/) en assistant vocal à la JARVIS : un noyau holographique réactif au son, une conversation en streaming, les outils, sous-agents, approbations, crons, skills et sessions d'Hermes pilotés depuis un seul HUD.
@@ -22,7 +22,7 @@ La version 2 est une réécriture complète : plus de robot 3D, un pipeline voca
 * **Capture micro** via AudioWorklet à 16 kHz, sans monitoring du micro dans les haut-parleurs, avec annulation d'écho et réduction de bruit.
 * **Détection d'activité vocale** (seuil adaptatif, sensibilité et silence de fin réglables) : l'enregistrement s'arrête tout seul quand vous avez fini de parler.
 * **Mains libres** : le micro se réactive après chaque réponse.
-* **Modèles intégrés, hors ligne** (sherpa-onnx dans un processus séparé) : reconnaissance Whisper (base, small, large-v3 turbo) ou SenseVoice, synthèse Kokoro v1.0 (voix française Siwis et voix anglaises) ou Piper (Siwis, Tom, UPMC). Les modèles se téléchargent depuis **Paramètres → Modèles locaux** et tournent sur le processeur.
+* **Modèles intégrés, hors ligne** (sherpa-onnx dans un processus séparé) : reconnaissance Parakeet v3, Whisper (base, small, large-v3 turbo) ou SenseVoice, synthèse **Supertonic 3** (31 langues dont le français, cinq voix masculines et cinq féminines, 44 kHz, 129 Mo, environ 7× plus rapide que le temps réel sur 4 cœurs), Kokoro v1.0 (excellent en anglais ; en français une seule voix féminine avec accent) ou Piper (Siwis, Tom, UPMC). Les modèles se téléchargent depuis **Paramètres → Modèles locaux** et tournent sur le processeur.
 * **Fin de phrase neuronale** : en écoute permanente, Silero VAD (0,6 Mo, sherpa-onnx) décide du début et de la fin de la commande à la place du seuil d'énergie ; moins de faux départs sur le bruit, coupure plus nette. Repli automatique sur le VAD énergétique si le modèle n'est pas installé.
 * **Vision d'écran** : « Jarvis, regarde mon écran » (ou le bouton de la barre de commande) joint une capture de l'écran principal à la question envoyée à Hermes.
 * **Actions locales instantanées** : « verrouille la session », « monte le son », « coupe le son », « piste suivante », « ouvre Spotify », « ouvre github.com »… exécutées sur le PC sans passer par Hermes, résultat lu à voix haute. Liste blanche d'actions dans le processus principal, désactivable dans les paramètres.
@@ -30,13 +30,15 @@ La version 2 est une réécriture complète : plus de robot 3D, un pipeline voca
 * **Heures calmes et priorités** : plage horaire pendant laquelle les messages poussés s'affichent sans être lus ni faire clignoter le noyau (badge « non lus » à la place), thème nuit automatique, mots prioritaires lus quand même, résumé vocal des rapports longs (les premières phrases seulement).
 * **Mode mission** : un bouton dans la barre de commande bascule sur un second modèle Hermes (plus puissant) pour les tâches longues ; le modèle rapide reste utilisé pour la conversation courante.
 * **Widget compact « glanceable »** : état (veille, écoute, réflexion, parle), dernière phrase de l'assistant, badge de non-lus, indicateurs heures calmes et mission.
-* **Voix JARVIS** : préréglage en un clic (Paramètres → Voix) : voix française masculine locale (Piper Tom, téléchargée automatiquement), timbre « JARVIS » (légèrement plus grave et posé, chaleur, présence, courte réverbération d'intercom), débit calme. Kokoro n'a pas de voix française masculine.
+* **Voix Microsoft Edge** (moteur par défaut) : les voix neuronales de la lecture à voix haute d'Edge, gratuites, sans clé ni installation : Henri, Denise, Rémy, Vivienne, Éloise (fr-FR) et les voix fr-CA, fr-CH, fr-BE, plus de 300 voix dans 74 langues. Le rendu le plus naturel disponible ; nécessite une connexion.
+* **Voix JARVIS** : deux préréglages en un clic (Paramètres → Voix) : en ligne (Edge Henri) ou hors ligne (Supertonic 3, voix masculine grave, téléchargé automatiquement), timbre « JARVIS » (légèrement plus grave et posé, chaleur, présence, courte réverbération d'intercom), débit calme.
 * **Reconnaissance française de référence** : Parakeet TDT 0.6B v3 (NVIDIA NeMo, 25 langues européennes) dans le catalogue, plus précis et bien plus rapide que Whisper sur processeur, avec ponctuation. Whisper base/small/turbo restent disponibles.
-* **Voix masculine ou féminine** : un réglage unique (Paramètres → Voix) appliqué à tous les moteurs. En local, Piper Tom ou Pierre (UPMC) pour le masculin, téléchargé automatiquement si aucune voix masculine n'est installée ; onyx / nova pour les API compatibles OpenAI ; Paul / Hortense pour les voix Windows.
+* **Voix masculine ou féminine** : un réglage unique (Paramètres → Voix) appliqué à tous les moteurs. Henri / Denise sur Edge ; en local Supertonic 3 (ou Piper Tom / Pierre) pour le masculin, téléchargé automatiquement si aucune voix masculine n'est installée, et le genre est conservé quand on change de modèle ; onyx / nova pour les API compatibles OpenAI ; Paul / Hortense pour les voix Windows. Google Translate n'a qu'une voix féminine par langue : le réglage l'indique.
 * **Barge-in** : en mains libres, parler par-dessus l'assistant coupe sa voix ; le seuil est relevé pendant qu'il parle pour ignorer l'écho du haut-parleur.
 * **Écoute permanente** : un détecteur de mot-clé de 3 Mo (sherpa-onnx, keyword spotting) tourne en continu sur le micro, quasi gratuit en CPU. « Jarvis » (ou n'importe quel mot-clé) ouvre l'écoute, « Jarvis, allume… » envoie directement la commande, et le mot coupe la voix en cours. Alternative : filtre du mot après transcription en mains libres.
 * **STT externe** : n'importe quelle API `/v1/audio/transcriptions` compatible OpenAI (Qwen3-ASR, Whisper, Speaches, faster-whisper-server, LocalAI, OpenAI). Repli sur la reconnaissance Chromium.
-* **TTS externe** : API `/v1/audio/speech` compatible OpenAI, voix système Windows ou Google Translate. Lecture phrase par phrase pendant le streaming, préchargement du segment suivant, coupure instantanée.
+* **TTS externe** : API `/v1/audio/speech` compatible OpenAI (Qwen3-TTS via un serveur compatible, Kokoro-FastAPI, OpenAI, LocalAI…), voix système Windows ou Google Translate. Lecture phrase par phrase pendant le streaming, préchargement du segment suivant, coupure instantanée.
+* **Traitement du micro débrayable** : l'annulation d'écho, la réduction de bruit et le gain automatique de Chromium peuvent être coupés (Paramètres → Reconnaissance) ; avec un casque, le signal brut est souvent mieux transcrit.
 * Raccourcis globaux : `Ctrl+Shift+Espace` (micro), `Ctrl+Shift+J` (afficher/masquer), `Ctrl+Shift+Échap` (couper la voix).
 
 ### Hermes, toute la puissance
