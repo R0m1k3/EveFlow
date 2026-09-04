@@ -72,18 +72,30 @@ export function hermesUrlCandidates(url: string): string[] {
   return [...out];
 }
 
-/** Probe candidate URLs until one answers Hermes JSON on /health or /v1/capabilities. */
+/** True when this base URL answers like the Hermes API (JSON on /v1/*, or 401/403 = key required). */
+export async function probeHermesUrl(config: HermesConfig, url: string): Promise<boolean> {
+  const client = new HermesClient({ ...config, url });
+  for (const path of ['/v1/capabilities', '/v1/models', '/health']) {
+    try {
+      const payload = await client.request<unknown>(path, { timeoutMs: 4000 });
+      if (payload && typeof payload === 'object') return true;
+    } catch (err) {
+      if (err instanceof HttpError) {
+        if (err.status === 401 || err.status === 403) return true; // the API is there, only the key is missing
+        if (/page web/.test(err.message)) return false; // a portal answers on this host: not the API
+        if (err.status === 404) continue; // older Hermes without this endpoint
+      }
+      return false;
+    }
+  }
+  return false;
+}
+
+/** Probe candidate URLs until one answers like the Hermes API. */
 export async function discoverHermesUrl(config: HermesConfig, onProgress?: (url: string) => void): Promise<string | null> {
   for (const candidate of hermesUrlCandidates(config.url)) {
     onProgress?.(candidate);
-    const client = new HermesClient({ ...config, url: candidate });
-    try {
-      await client.request<unknown>('/health', { timeoutMs: 4000 });
-      return candidate;
-    } catch (err) {
-      if (err instanceof HttpError && (err.status === 401 || err.status === 403)) return candidate; // API found, key missing
-      continue;
-    }
+    if (await probeHermesUrl(config, candidate)) return candidate;
   }
   return null;
 }

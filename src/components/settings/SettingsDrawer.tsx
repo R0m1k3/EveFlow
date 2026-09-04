@@ -108,6 +108,7 @@ export function SettingsDrawer({ onClose }: Props) {
         caps = ` · modèle ${String(c.model ?? '?')} · ${Object.entries(c.features ?? {}).filter(([, v]) => v === true).length} fonctions`;
       } catch (err) {
         const message = (err as Error).message;
+        if (/page web/.test(message)) throw err;
         caps = /404/.test(message)
           ? ' · /v1/capabilities absent (Hermes ancien : transport chat completions)'
           : ` · capabilities : ${message}`;
