@@ -164,3 +164,12 @@ export const VOICE_CATALOG: VoiceModelSpec[] = [
 export function findModel(id: string): VoiceModelSpec | undefined {
   return VOICE_CATALOG.find((m) => m.id === id);
 }
+
+// Speaker gender from the label ("(homme, …)", "(femme, …)", known first names) so the UI and the
+// voice preference can pick a masculine or feminine voice without a lookup table per model.
+const MALE = /\b(homme|tom|pierre|adam|michael|eric|liam|george|lewis|daniel|fenrir|puck|onyx|echo|santa)\b/i;
+for (const spec of VOICE_CATALOG) {
+  for (const sp of spec.speakers ?? []) {
+    if (!sp.gender) sp.gender = /\b(femme|female)\b/i.test(sp.name) ? 'f' : MALE.test(sp.name) ? 'm' : /\bfemme\b/i.test(spec.name) ? 'f' : /\bhomme\b/i.test(spec.name) ? 'm' : undefined;
+  }
+}

@@ -38,6 +38,8 @@ interface HermesStore {
   sessions: HermesSession[];
   jobs: HermesJob[];
   jobRuns: JobRun[];
+  /** Last cron sync failure (the chat link stays independent of it). */
+  jobsError: string | null;
   transport: ResolvedTransport;
   lastSyncAt: number | null;
   webhook: WebhookStatus | null;
@@ -88,6 +90,7 @@ export const useHermes = create<HermesStore>((set, get) => ({
   sessions: [],
   jobs: [],
   jobRuns: [],
+  jobsError: null,
   transport: 'completions',
   lastSyncAt: null,
   webhook: null,
@@ -119,8 +122,8 @@ export const useHermes = create<HermesStore>((set, get) => ({
         Log.warn('hermes', `capabilities unavailable: ${(err as Error).message}`);
       }
       const transport = resolveTransport(config, capabilities);
-      const degraded = String(health.status ?? 'ok').toLowerCase() !== 'ok';
-      set({ health, capabilities, transport, link: degraded ? 'degraded' : 'online', linkDetail: degraded ? `état ${health.status}` : '' });
+      const degraded = !isHealthyStatus(health.status);
+      set({ health, capabilities, transport, link: degraded ? 'degraded' : 'online', linkDetail: degraded ? describeHealth(health) : '' });
       Log.info('hermes', `connected (${transport})`, { status: health.status, model: capabilities?.model });
       void get().refreshCatalog();
       void get().refreshJobs();
@@ -165,7 +168,7 @@ export const useHermes = create<HermesStore>((set, get) => ({
       const merged = [...incoming, ...previous.filter((r) => !incoming.some((i) => i.id === r.id))]
         .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
         .slice(0, 100);
-      set({ jobs, jobRuns: merged, lastSyncAt: Date.now(), link: get().link === 'offline' || get().link === 'degraded' ? 'online' : get().link });
+      set({ jobs, jobRuns: merged, jobsError: null, lastSyncAt: Date.now(), link: get().link === 'offline' ? 'online' : get().link });
       const snapshot = JSON.stringify({ jobs, jobRuns: merged });
       if (snapshot !== lastCacheSnapshot) {
         lastCacheSnapshot = snapshot;
@@ -174,9 +177,8 @@ export const useHermes = create<HermesStore>((set, get) => ({
     } catch (err) {
       const message = (err as Error).message;
       Log.warn('hermes', `jobs sync failed: ${message}`);
-      if (/HTTP 404/.test(message)) return; // jobs API disabled on this server
-      // A failing jobs poll does not mean chat is down: degrade, and let the next health probe decide.
-      set({ linkDetail: message, link: get().link === 'online' ? 'degraded' : get().link });
+      // The cron API can be absent or restricted on a given Hermes: the chat link is unaffected.
+      set({ jobsError: /HTTP 404/.test(message) ? 'API des crons absente sur ce serveur Hermes' : message });
     }
   },
 
@@ -233,3 +235,31 @@ export const useHermes = create<HermesStore>((set, get) => ({
 }));
 
 export { jobStatus };
+
+const HEALTHY = new Set(['ok', 'healthy', 'up', 'alive', 'pass', 'ready', 'running', 'online', 'true']);
+
+/** Hermes /health reports "ok"; /health/detailed may report "healthy", "degraded" or "unhealthy". */
+export function isHealthyStatus(status: unknown): boolean {
+  if (status === undefined || status === null || status === '') return true;
+  return HEALTHY.has(String(status).toLowerCase());
+}
+
+/** Human summary of a degraded health payload: failing checks by name. */
+export function describeHealth(health: Record<string, unknown>): string {
+  const failing: string[] = [];
+  const visit = (node: unknown, prefix: string, depth: number) => {
+    if (!node || typeof node !== 'object' || depth > 3) return;
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if (key === 'status') continue;
+      if (value && typeof value === 'object') {
+        const rec = value as Record<string, unknown>;
+        const st = rec.status ?? rec.ok ?? rec.healthy;
+        if (st !== undefined && !isHealthyStatus(st)) failing.push(prefix + key);
+        else visit(value, `${prefix}${key}.`, depth + 1);
+      } else if (typeof value === 'boolean' && !value && /ok|healthy|ready|connected|available/i.test(key)) failing.push(prefix + key);
+    }
+  };
+  visit(health, '', 0);
+  const base = `état ${String(health.status)}`;
+  return failing.length ? `${base} · ${failing.slice(0, 4).join(', ')}` : base;
+}

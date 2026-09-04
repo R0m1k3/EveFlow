@@ -154,3 +154,27 @@ export function formatDuration(seconds: number): string {
   if (h > 0) return `${h}h ${m.toString().padStart(2, '0')}m`;
   return `${m}m ${(s % 60).toString().padStart(2, '0')}s`;
 }
+
+const NOISE_PHRASES = [
+  'sous-titres réalisés par la communauté d\'amara.org',
+  'sous-titrage société radio-canada',
+  'merci d\'avoir regardé',
+  'abonnez-vous',
+  'thank you for watching',
+  'thanks for watching',
+  '...'
+];
+
+/**
+ * Whisper-style hallucinations on silence or clicks: "(cliquant)", "*Claire*", "[Musique]",
+ * "Sous-titres réalisés par…". Such transcripts must not be sent to Hermes.
+ */
+export function isTranscriptNoise(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  if (/^[\s\p{P}\p{S}]*$/u.test(t)) return true;
+  // whole transcript wrapped in brackets/asterisks: a sound description
+  if (/^[(\[*«"'\s]+[^()\[\]*]{0,60}[)\]*»"'\s]+$/u.test(t) && !/[a-zà-ÿ]{3,}\s+[a-zà-ÿ]{3,}\s+[a-zà-ÿ]{3,}/i.test(t)) return true;
+  const lower = t.toLowerCase().replace(/[.!?…\s]+$/u, '');
+  return NOISE_PHRASES.some((p) => lower === p.replace(/[.!?…\s]+$/u, ''));
+}

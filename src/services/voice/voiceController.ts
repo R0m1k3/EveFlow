@@ -2,6 +2,7 @@
  * Voice controller: microphone → VAD → STT → conversation, plus hands-free loop and barge-in.
  */
 import { Log } from '../../lib/log';
+import { isTranscriptNoise } from '../../lib/text';
 import { useChat } from '../../state/chat';
 import { useSettings } from '../../state/settings';
 import { useVoice } from '../../state/voice';
@@ -344,6 +345,10 @@ class VoiceController {
     const settings = useSettings.getState().settings.voice;
     try {
       let text = await transcribeWav(wav.bytes, settings);
+      if (isTranscriptNoise(text)) {
+        Log.debug('voice', `transcript ignored as noise: ${text}`);
+        text = '';
+      }
       voice.setTranscript(text);
       voice.setPhase('off');
       Log.info('voice', `transcript (${wav.durationSec.toFixed(1)}s): ${text}`);
