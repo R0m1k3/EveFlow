@@ -122,6 +122,8 @@ export const useHermes = create<HermesStore>((set, get) => ({
       try {
         capabilities = await client.capabilities();
       } catch (err) {
+        // A web page on /v1/* means the whole API is behind a portal even if /health passed through.
+        if (/page web/.test((err as Error).message)) throw err;
         Log.warn('hermes', `capabilities unavailable: ${(err as Error).message}`);
       }
       const transport = resolveTransport(config, capabilities);
