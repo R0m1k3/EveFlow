@@ -5,6 +5,8 @@ import { HermesClient, discoverHermesUrl, hermesUrlCandidates } from '../../serv
 import { listSystemVoices } from '../../services/voice/tts';
 import { speech } from '../../services/voice/speech';
 import { ensurePreferredVoice } from '../../services/voice/voicePreference';
+import { pickSpeaker, resolveEdgeVoice } from '../../lib/voicePreference';
+import type { EdgeVoice } from '../../../shared/voice';
 import { listMicrophones } from '../../services/voice/capture';
 import { transcribeWav } from '../../services/voice/stt';
 import { encodeWav } from '../../services/voice/wav';
@@ -86,7 +88,17 @@ export function SettingsDrawer({ onClose }: Props) {
   const [sttTest, setSttTest] = useState<TestState>({ status: 'idle', message: '' });
   const [ttsTest, setTtsTest] = useState<TestState>({ status: 'idle', message: '' });
   const [voices, setVoices] = useState(listSystemVoices());
+  const [edgeVoices, setEdgeVoices] = useState<EdgeVoice[]>([]);
   const [webhookSecretVisible, setWebhookSecretVisible] = useState(false);
+
+  const speechProvider = settings.speech.provider;
+  useEffect(() => {
+    if (speechProvider !== 'edge' || edgeVoices.length) return;
+    bridge()
+      ?.voice.edgeVoices()
+      .then(setEdgeVoices)
+      .catch((err: Error) => setTtsTest({ status: 'fail', message: `Liste des voix Edge indisponible : ${err.message}` }));
+  }, [speechProvider, edgeVoices.length]);
 
   useEffect(() => {
     const refresh = () => setVoices(listSystemVoices());
@@ -359,6 +371,12 @@ export function SettingsDrawer({ onClose }: Props) {
               </>
             )}
             <Toggle on={settings.voice.localCommands} onChange={(v) => update({ voice: { localCommands: v } })} label="Commandes locales instantanées" hint="« Verrouille la session », « monte le son », « ouvre Spotify », « regarde mon écran »… exécutées sur ce PC sans passer par Hermes." />
+            <Toggle
+              on={settings.voice.micProcessing ?? true}
+              onChange={(v) => update({ voice: { micProcessing: v } })}
+              label="Traitement du micro par Chromium (écho, bruit, gain automatique)"
+              hint="Désactivez-le si les transcriptions sont approximatives avec un casque ou un bon micro : ces filtres déforment la voix avant la reconnaissance. Gardez-le activé avec des haut-parleurs (sinon la voix de l’assistant est réentendue par le micro)."
+            />
             <div className="row" style={{ marginTop: 10 }}>
               <button className="btn small" onClick={() => void testStt()} disabled={settings.voice.provider === 'browser'}><Mic size={13} /> Tester la reconnaissance</button>
             </div>
@@ -374,7 +392,11 @@ export function SettingsDrawer({ onClose }: Props) {
                 <button className={(settings.speech.voiceGender ?? 'male') === 'male' ? 'active' : ''} onClick={() => { update({ speech: { voiceGender: 'male' } }); void ensurePreferredVoice().then((m) => m && setTtsTest({ status: 'ok', message: m })); }}>Masculine</button>
                 <button className={settings.speech.voiceGender === 'female' ? 'active' : ''} onClick={() => { update({ speech: { voiceGender: 'female' } }); void ensurePreferredVoice().then((m) => m && setTtsTest({ status: 'ok', message: m })); }}>Féminine</button>
               </div>
-              <span className="hint">S’applique à tous les moteurs : voix locale (Piper Tom ou Pierre pour le masculin, téléchargée automatiquement si besoin), voix OpenAI (onyx / nova), voix système Windows (Paul / Hortense). Kokoro n’a pas de voix française masculine.</span>
+              <span className="hint">
+                S’applique à tous les moteurs : Edge (Henri / Denise), voix locale (Supertonic 3, cinq voix de chaque genre, téléchargé automatiquement si besoin), API OpenAI (onyx / nova), voix système Windows (Paul / Hortense).
+                {settings.speech.provider === 'google-free' && ' Google Translate n’a qu’une voix féminine : ce choix n’a pas d’effet avec ce moteur.'}
+                {settings.speech.provider === 'local' && settings.speech.localModel === 'kokoro-v1' && ' Kokoro n’a qu’une voix française, féminine et avec accent : la voix masculine bascule sur Supertonic 3.'}
+              </span>
             </div>
             <div className="field">
               <label>Timbre</label>
@@ -388,29 +410,62 @@ export function SettingsDrawer({ onClose }: Props) {
               <button
                 className="btn small primary"
                 onClick={() => {
-                  update({ speech: { provider: 'local', voiceGender: 'male', timbre: 'jarvis', speed: 0.97, autoSpeak: true } });
-                  setTtsTest({ status: 'running', message: 'préparation de la voix JARVIS (téléchargement de Piper Tom si nécessaire)…' });
+                  update({ speech: { provider: 'edge', edgeVoice: '', voiceGender: 'male', timbre: 'jarvis', speed: 0.97, autoSpeak: true } });
                   void ensurePreferredVoice().then((m) => setTtsTest({ status: 'ok', message: m || 'Voix JARVIS prête.' })).catch((e: Error) => setTtsTest({ status: 'fail', message: e.message }));
                 }}
               >
-                <Volume2 size={13} /> Préréglage voix JARVIS (français, masculine, locale)
+                <Volume2 size={13} /> Voix JARVIS en ligne (Edge Henri, masculine)
+              </button>
+              <button
+                className="btn small"
+                onClick={() => {
+                  update({ speech: { provider: 'local', voiceGender: 'male', timbre: 'jarvis', speed: 0.97, autoSpeak: true } });
+                  setTtsTest({ status: 'running', message: 'préparation de la voix JARVIS locale (téléchargement de Supertonic 3, 129 Mo, si nécessaire)…' });
+                  void ensurePreferredVoice({ upgrade: true }).then((m) => setTtsTest({ status: 'ok', message: m || 'Voix JARVIS locale prête.' })).catch((e: Error) => setTtsTest({ status: 'fail', message: e.message }));
+                }}
+              >
+                <Volume2 size={13} /> Voix JARVIS hors ligne (Supertonic 3, masculine)
               </button>
               <span className="status-pill">
                 {settings.speech.provider === 'local'
                   ? `voix active : ${voiceModels.find((m) => m.id === settings.speech.localModel)?.speakers?.find((s) => s.id === settings.speech.localSpeaker)?.name ?? settings.speech.localModel}`
-                  : `moteur : ${settings.speech.provider}`}
+                  : settings.speech.provider === 'edge'
+                    ? `voix active : ${resolveEdgeVoice(settings.speech.edgeVoice ?? '', settings.speech.language, settings.speech.voiceGender ?? 'male')}`
+                    : `moteur : ${settings.speech.provider}`}
               </span>
             </div>
             <div className="field">
               <label>Moteur de synthèse</label>
-              <select className="select" value={settings.speech.provider} onChange={(e) => update({ speech: { provider: e.target.value as typeof settings.speech.provider } })}>
-                <option value="local">Local dans l’application (Kokoro / Piper via sherpa-onnx, hors ligne)</option>
-                <option value="openai-compatible">API compatible OpenAI /v1/audio/speech (Kokoro, Piper, OpenAI, LocalAI…)</option>
+              <select
+                className="select"
+                value={settings.speech.provider}
+                onChange={(e) => {
+                  update({ speech: { provider: e.target.value as typeof settings.speech.provider } });
+                  void ensurePreferredVoice().then((m) => m && setTtsTest({ status: 'ok', message: m }));
+                }}
+              >
+                <option value="edge">Microsoft Edge (voix neuronales, gratuit, en ligne, sans clé) — recommandé</option>
+                <option value="local">Local dans l’application (Supertonic 3 / Kokoro / Piper via sherpa-onnx, hors ligne)</option>
+                <option value="openai-compatible">API compatible OpenAI /v1/audio/speech (Qwen3-TTS, Kokoro, OpenAI, LocalAI…)</option>
                 <option value="system">Voix système Windows</option>
-                <option value="google-free">Google Translate (gratuit, en ligne)</option>
+                <option value="google-free">Google Translate (gratuit, en ligne, voix féminine uniquement)</option>
                 <option value="off">Désactivée</option>
               </select>
             </div>
+            {settings.speech.provider === 'edge' && (
+              <div className="field">
+                <label>Voix Edge</label>
+                <select className="select" value={settings.speech.edgeVoice ?? ''} onChange={(e) => update({ speech: { edgeVoice: e.target.value } })}>
+                  <option value="">Automatique ({resolveEdgeVoice('', settings.speech.language, settings.speech.voiceGender ?? 'male')})</option>
+                  {edgeVoices
+                    .filter((v) => v.locale.toLowerCase().startsWith(settings.speech.language.toLowerCase().split('-')[0]))
+                    .map((v) => (
+                      <option key={v.shortName} value={v.shortName}>{v.name} · {v.locale} · {v.gender === 'm' ? 'homme' : 'femme'}</option>
+                    ))}
+                </select>
+                <span className="hint">Mêmes voix que la lecture à voix haute d’Edge : Henri, Denise, Rémy, Vivienne, Éloise (fr-FR), plus les voix canadiennes, suisses et belges. Aucune donnée locale ; chaque phrase est synthétisée en ligne.</span>
+              </div>
+            )}
             {settings.speech.provider === 'openai-compatible' && (
               <>
                 <div className="field">
@@ -424,7 +479,7 @@ export function SettingsDrawer({ onClose }: Props) {
                   </div>
                   <div className="field">
                     <label>Voix</label>
-                    <input className="input" value={settings.speech.voice} placeholder="alloy, onyx, af_heart…" onChange={(e) => update({ speech: { voice: e.target.value } })} />
+                    <input className="input" value={settings.speech.voice} placeholder="onyx, nova, af_heart, Ryan (Qwen3-TTS)…" onChange={(e) => update({ speech: { voice: e.target.value } })} />
                   </div>
                   <div className="field">
                     <label>Clé API</label>
@@ -444,7 +499,7 @@ export function SettingsDrawer({ onClose }: Props) {
             {settings.speech.provider === 'local' && (
               installedModels(voiceModels, 'tts').length === 0 ? (
                 <div className="field">
-                  <span className="hint">Aucun modèle de voix installé. <a href="#" onClick={(e) => { e.preventDefault(); setSection('models'); }}>Téléchargez Kokoro dans « Modèles locaux »</a>.</span>
+                  <span className="hint">Aucun modèle de voix installé. <a href="#" onClick={(e) => { e.preventDefault(); setSection('models'); }}>Téléchargez Supertonic 3 dans « Modèles locaux »</a>.</span>
                 </div>
               ) : (
                 <div className="grid-2">
@@ -452,7 +507,8 @@ export function SettingsDrawer({ onClose }: Props) {
                     <label>Modèle local</label>
                     <select className="select" value={settings.speech.localModel} onChange={(e) => {
                       const m = voiceModels.find((x) => x.id === e.target.value);
-                      update({ speech: { localModel: e.target.value, localSpeaker: m?.speakers?.[0]?.id ?? 0 } });
+                      // Keep the preferred gender when switching models (Kokoro has no masculine French voice: it falls back to Siwis).
+                      update({ speech: { localModel: e.target.value, localSpeaker: m ? pickSpeaker(m, settings.speech.language, settings.speech.voiceGender ?? 'male') : 0 } });
                     }}>
                       {installedModels(voiceModels, 'tts').map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select>

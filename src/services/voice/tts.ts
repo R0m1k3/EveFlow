@@ -1,16 +1,17 @@
 /**
  * Text-to-speech engine with a sentence queue, bounded prefetching and Web Audio playback so
- * the HUD reacts to the actual waveform. Providers: in-app sherpa-onnx (Kokoro / Piper),
- * OpenAI-compatible /v1/audio/speech, system voices, and the legacy Google Translate endpoint.
+ * the HUD reacts to the actual waveform. Providers: Microsoft Edge neural voices (online, free),
+ * in-app sherpa-onnx (Supertonic / Kokoro / Piper), OpenAI-compatible /v1/audio/speech, system
+ * voices, and the legacy Google Translate endpoint (one feminine voice per language).
  */
 import { Log } from '../../lib/log';
-import { defaultOpenAiVoice, rankSystemVoice } from '../../lib/voicePreference';
+import { defaultOpenAiVoice, rankSystemVoice, resolveEdgeVoice } from '../../lib/voicePreference';
 import { bridge } from '../../lib/bridge';
 import { chunkForSpeech, cleanForSpeech, extractSentences } from '../../lib/text';
 import { httpFetch } from '../../lib/transport';
 import { audioBus } from './audioBus';
 
-export type TtsProvider = 'openai-compatible' | 'system' | 'google-free' | 'local' | 'off';
+export type TtsProvider = 'edge' | 'openai-compatible' | 'system' | 'google-free' | 'local' | 'off';
 
 export interface TtsConfig {
   provider: TtsProvider;
@@ -27,6 +28,8 @@ export interface TtsConfig {
   localModel: string;
   /** Speaker id inside the local model. */
   localSpeaker: number;
+  /** Microsoft Edge voice short name (provider 'edge'); empty = automatic from language + gender. */
+  edgeVoice?: string;
   /** Preferred voice gender, applied to every provider's default voice. */
   voiceGender?: 'male' | 'female';
   /** 'jarvis' adds a subtle AI timbre: slightly lower pitch, warm/crisp EQ, short room reverb. */
@@ -179,8 +182,9 @@ export class TtsEngine {
   }
 
   private prefetch(text: string, gen: number): Promise<AudioBuffer | null> {
+    const provider = this.config.provider;
     const task =
-      this.config.provider === 'google-free' ? this.fetchGoogle(text) : this.config.provider === 'local' ? this.fetchLocal(text) : this.fetchOpenAi(text);
+      provider === 'google-free' ? this.fetchGoogle(text) : provider === 'local' ? this.fetchLocal(text) : provider === 'edge' ? this.fetchEdge(text) : this.fetchOpenAi(text);
     return task
       .then(async (bytes) => {
         if (gen !== this.generation || !bytes) return null;
@@ -228,10 +232,21 @@ export class TtsEngine {
       modelId: this.config.localModel,
       text,
       speaker: this.config.localSpeaker,
-      speed: Math.max(0.5, Math.min(2, this.config.speed || 1))
+      speed: Math.max(0.5, Math.min(2, this.config.speed || 1)),
+      language: this.config.language || 'fr-FR'
     });
     Log.debug('tts', `local synthesis ${result.durationMs} ms for ${result.audioSec.toFixed(1)}s of audio`);
     return result.wav;
+  }
+
+  /** Microsoft Edge neural voices through the main process (no key, online). */
+  private async fetchEdge(text: string): Promise<Uint8Array> {
+    const api = bridge();
+    if (!api) throw new Error('Les voix Edge nécessitent l’application Electron.');
+    const voice = resolveEdgeVoice(this.config.edgeVoice ?? '', this.config.language || 'fr-FR', this.config.voiceGender ?? 'male');
+    const result = await api.voice.edgeSynthesize({ text, voice, speed: Math.max(0.5, Math.min(2, this.config.speed || 1)) });
+    Log.debug('tts', `edge synthesis (${voice}) ${result.durationMs} ms, ${result.mp3.byteLength} bytes`);
+    return result.mp3;
   }
 
   private async fetchGoogle(text: string): Promise<Uint8Array> {

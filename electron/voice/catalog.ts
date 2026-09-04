@@ -17,6 +17,22 @@ const KOKORO_SPEAKERS: VoiceSpeaker[] = [
   { id: 26, name: 'George (homme, anglais UK)', lang: 'en' }
 ];
 
+// Supertonic 3 ships ten voice styles in voice.bin (five feminine, five masculine). The ordering
+// was checked by measuring the fundamental frequency of French synthesis: sid 0-4 around
+// 170-210 Hz, sid 5-9 around 90-140 Hz.
+const SUPERTONIC_SPEAKERS: VoiceSpeaker[] = [
+  { id: 6, name: 'Homme 2 (grave, posé)', lang: 'multi', gender: 'm' },
+  { id: 9, name: 'Homme 5 (grave)', lang: 'multi', gender: 'm' },
+  { id: 7, name: 'Homme 3', lang: 'multi', gender: 'm' },
+  { id: 8, name: 'Homme 4', lang: 'multi', gender: 'm' },
+  { id: 5, name: 'Homme 1 (clair)', lang: 'multi', gender: 'm' },
+  { id: 0, name: 'Femme 1', lang: 'multi', gender: 'f' },
+  { id: 1, name: 'Femme 2', lang: 'multi', gender: 'f' },
+  { id: 2, name: 'Femme 3', lang: 'multi', gender: 'f' },
+  { id: 3, name: 'Femme 4', lang: 'multi', gender: 'f' },
+  { id: 4, name: 'Femme 5', lang: 'multi', gender: 'f' }
+];
+
 export const VOICE_CATALOG: VoiceModelSpec[] = [
   {
     id: 'whisper-base',
@@ -113,19 +129,35 @@ export const VOICE_CATALOG: VoiceModelSpec[] = [
     recommended: true
   },
   {
+    id: 'supertonic-3',
+    kind: 'tts',
+    engine: 'supertonic',
+    name: 'Supertonic 3 (31 langues, 5 voix masculines et 5 féminines)',
+    description:
+      'La meilleure voix française locale : naturelle, sans accent, dix voix au choix, 44 kHz. Environ 7 fois plus rapide que le temps réel sur 4 cœurs, 100 M de paramètres.',
+    languages: ['fr', 'en', 'de', 'es', 'it', 'pt', 'multi'],
+    sizeMb: 129,
+    url: `${TTS}/sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2`,
+    dir: 'sherpa-onnx-supertonic-3-tts-int8-2026-05-11',
+    files: ['duration_predictor.int8.onnx', 'text_encoder.int8.onnx', 'vector_estimator.int8.onnx', 'vocoder.int8.onnx', 'tts.json', 'unicode_indexer.bin', 'voice.bin'],
+    speakers: SUPERTONIC_SPEAKERS,
+    sampleRate: 44100,
+    recommended: true
+  },
+  {
     id: 'kokoro-v1',
     kind: 'tts',
     engine: 'kokoro',
     name: 'Kokoro v1.0 multilingue',
-    description: 'Voix très naturelle, une voix française (Siwis) et de nombreuses voix anglaises. 24 kHz.',
-    languages: ['fr', 'en', 'multi'],
+    description:
+      'Excellent en anglais (nombreuses voix). En français : une seule voix, féminine (Siwis), avec un accent marqué (phonémisation espeak). Préférez Supertonic 3 pour le français. 24 kHz.',
+    languages: ['en', 'fr', 'multi'],
     sizeMb: 349,
     url: `${TTS}/kokoro-multi-lang-v1_0.tar.bz2`,
     dir: 'kokoro-multi-lang-v1_0',
     files: ['model.onnx', 'voices.bin', 'tokens.txt', 'lexicon-us-en.txt', 'lexicon-zh.txt', 'espeak-ng-data/phontab'],
     speakers: KOKORO_SPEAKERS,
-    sampleRate: 24000,
-    recommended: true
+    sampleRate: 24000
   },
   {
     id: 'piper-fr-siwis',
@@ -181,6 +213,9 @@ export function findModel(id: string): VoiceModelSpec | undefined {
 // Speaker gender from the label ("(homme, …)", "(femme, …)", known first names) so the UI and the
 // voice preference can pick a masculine or feminine voice without a lookup table per model.
 const MALE = /\b(homme|tom|pierre|adam|michael|eric|liam|george|lewis|daniel|fenrir|puck|onyx|echo|santa)\b/i;
+
+/** Languages accepted by the Supertonic 3 text front-end (2-letter codes). */
+export const SUPERTONIC_LANGS = new Set(['ar', 'bg', 'hr', 'cs', 'da', 'nl', 'en', 'et', 'fi', 'fr', 'de', 'el', 'hi', 'hu', 'id', 'it', 'ja', 'ko', 'lv', 'lt', 'pl', 'pt', 'ro', 'ru', 'sk', 'sl', 'es', 'sv', 'tr', 'uk', 'vi']);
 for (const spec of VOICE_CATALOG) {
   for (const sp of spec.speakers ?? []) {
     if (!sp.gender) sp.gender = /\b(femme|female)\b/i.test(sp.name) ? 'f' : MALE.test(sp.name) ? 'm' : /\bfemme\b/i.test(spec.name) ? 'f' : /\bhomme\b/i.test(spec.name) ? 'm' : undefined;

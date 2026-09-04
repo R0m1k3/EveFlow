@@ -128,6 +128,7 @@ class VoiceController {
       }
       await this.wake.start({
         deviceId: settings.micDeviceId || undefined,
+        micProcessing: settings.micProcessing ?? true,
         neuralVad,
         vad: { silenceMs: settings.silenceMs, speechRatio: SENSITIVITY_RATIO[sensitivity], minRms: SENSITIVITY_MIN_RMS[sensitivity] },
         callbacks: {
@@ -249,6 +250,7 @@ class VoiceController {
       await audioBus.resume();
       await this.capture.start({
         deviceId: settings.micDeviceId || undefined,
+        micProcessing: settings.micProcessing ?? true,
         mode: settings.captureMode,
         vad: {
           silenceMs: settings.silenceMs,

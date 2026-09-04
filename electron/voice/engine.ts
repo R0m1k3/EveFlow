@@ -134,7 +134,7 @@ export function transcribe(req: TranscribeRequest): Promise<TranscribeResult> {
 
 export async function synthesize(req: SynthesizeRequest): Promise<SynthesizeResult> {
   const result = await request<Omit<SynthesizeResult, 'wav'> & { wav: string }>(
-    { type: 'synthesize', model: modelRef(req.modelId), text: req.text, speaker: req.speaker, speed: req.speed },
+    { type: 'synthesize', model: modelRef(req.modelId), text: req.text, speaker: req.speaker, speed: req.speed, language: req.language },
     180_000
   );
   const buffer = Buffer.from(result.wav, 'base64');

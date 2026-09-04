@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron';
-import { VOICE_IPC, type KwsStartRequest, type SynthesizeRequest, type TranscribeRequest, type VadStartRequest } from '../../shared/voice';
+import { VOICE_IPC, type EdgeSynthesizeRequest, type KwsStartRequest, type SynthesizeRequest, type TranscribeRequest, type VadStartRequest } from '../../shared/voice';
+import { edgeSynthesize, edgeVoices } from './edgeTts';
 import { engineStatus, kwsFeed, kwsStart, kwsStop, synthesize, transcribe, unload, vadFeed, vadStart, vadStop } from './engine';
 import { cancelDownload, downloadModel, listModels, removeModel } from './models';
 
@@ -24,8 +25,19 @@ export function registerVoiceIpc(): void {
   ipcMain.handle(VOICE_IPC.synthesize, (_e, req: SynthesizeRequest) => {
     if (!req || typeof req.text !== 'string' || !req.text.trim() || req.text.length > 5000) throw new Error('Texte invalide');
     if (typeof req.modelId !== 'string') throw new Error('Modèle invalide');
-    return synthesize({ ...req, speaker: Number.isFinite(req.speaker) ? req.speaker : 0, speed: Number.isFinite(req.speed) ? req.speed : 1 });
+    return synthesize({
+      ...req,
+      speaker: Number.isFinite(req.speaker) ? req.speaker : 0,
+      speed: Number.isFinite(req.speed) ? req.speed : 1,
+      language: typeof req.language === 'string' ? req.language.slice(0, 8) : undefined
+    });
   });
+  ipcMain.handle(VOICE_IPC.edgeSynthesize, (_e, req: EdgeSynthesizeRequest) => {
+    if (!req || typeof req.text !== 'string' || !req.text.trim() || req.text.length > 5000) throw new Error('Texte invalide');
+    if (typeof req.voice !== 'string' || !/^[a-z]{2,3}-[A-Za-z]{2,4}-[A-Za-z0-9]+$/.test(req.voice)) throw new Error('Voix Edge invalide');
+    return edgeSynthesize({ text: req.text, voice: req.voice, speed: Number.isFinite(req.speed) ? req.speed : 1 });
+  });
+  ipcMain.handle(VOICE_IPC.edgeVoices, () => edgeVoices());
   ipcMain.handle(VOICE_IPC.unload, (_e, id?: string) => unload(id));
   ipcMain.handle(VOICE_IPC.kwsStart, (event, req: KwsStartRequest) => {
     if (!req || !Array.isArray(req.keywords) || typeof req.modelId !== 'string') throw new Error('Requête invalide');
