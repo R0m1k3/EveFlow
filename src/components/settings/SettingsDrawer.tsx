@@ -374,7 +374,32 @@ export function SettingsDrawer({ onClose }: Props) {
                 <button className={(settings.speech.voiceGender ?? 'male') === 'male' ? 'active' : ''} onClick={() => { update({ speech: { voiceGender: 'male' } }); void ensurePreferredVoice().then((m) => m && setTtsTest({ status: 'ok', message: m })); }}>Masculine</button>
                 <button className={settings.speech.voiceGender === 'female' ? 'active' : ''} onClick={() => { update({ speech: { voiceGender: 'female' } }); void ensurePreferredVoice().then((m) => m && setTtsTest({ status: 'ok', message: m })); }}>Féminine</button>
               </div>
-              <span className="hint">S’applique à tous les moteurs : voix locale (Piper Tom ou Pierre pour le masculin, téléchargée automatiquement si besoin), voix OpenAI (onyx / nova), voix système Windows (Paul / Hortense).</span>
+              <span className="hint">S’applique à tous les moteurs : voix locale (Piper Tom ou Pierre pour le masculin, téléchargée automatiquement si besoin), voix OpenAI (onyx / nova), voix système Windows (Paul / Hortense). Kokoro n’a pas de voix française masculine.</span>
+            </div>
+            <div className="field">
+              <label>Timbre</label>
+              <div className="segmented">
+                <button className={settings.speech.timbre === 'jarvis' ? 'active' : ''} onClick={() => update({ speech: { timbre: 'jarvis' } })}>JARVIS</button>
+                <button className={settings.speech.timbre !== 'jarvis' ? 'active' : ''} onClick={() => update({ speech: { timbre: 'natural' } })}>Naturel</button>
+              </div>
+              <span className="hint">JARVIS : voix légèrement plus grave et posée, chaleur dans les basses, présence, courte réverbération d’intercom, comme dans le film.</span>
+            </div>
+            <div className="row" style={{ marginBottom: 10 }}>
+              <button
+                className="btn small primary"
+                onClick={() => {
+                  update({ speech: { provider: 'local', voiceGender: 'male', timbre: 'jarvis', speed: 0.97, autoSpeak: true } });
+                  setTtsTest({ status: 'running', message: 'préparation de la voix JARVIS (téléchargement de Piper Tom si nécessaire)…' });
+                  void ensurePreferredVoice().then((m) => setTtsTest({ status: 'ok', message: m || 'Voix JARVIS prête.' })).catch((e: Error) => setTtsTest({ status: 'fail', message: e.message }));
+                }}
+              >
+                <Volume2 size={13} /> Préréglage voix JARVIS (français, masculine, locale)
+              </button>
+              <span className="status-pill">
+                {settings.speech.provider === 'local'
+                  ? `voix active : ${voiceModels.find((m) => m.id === settings.speech.localModel)?.speakers?.find((s) => s.id === settings.speech.localSpeaker)?.name ?? settings.speech.localModel}`
+                  : `moteur : ${settings.speech.provider}`}
+              </span>
             </div>
             <div className="field">
               <label>Moteur de synthèse</label>

@@ -7,6 +7,7 @@
 import { bridge } from '../../lib/bridge';
 import { Log } from '../../lib/log';
 import { audioBus } from './audioBus';
+import { loadWorklet } from './capture';
 import { DEFAULT_VAD, EnergyVad, type VadOptions } from './vad';
 import { buildWav16k, rms, type WavResult } from './wav';
 import type { VadEvent } from '../../../shared/voice';
@@ -103,8 +104,10 @@ export class WakeListener {
     analyser.fftSize = 512;
     source.connect(analyser);
     audioBus.setInputAnalyser(analyser);
-    if (!workletUrl) workletUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'application/javascript' }));
-    await this.ctx.audioWorklet.addModule(workletUrl);
+    await loadWorklet(this.ctx, 'eveflow-wake', () => {
+      if (!workletUrl) workletUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'application/javascript' }));
+      return workletUrl;
+    });
     this.node = new AudioWorkletNode(this.ctx, 'eveflow-wake', { numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1 });
     this.node.port.onmessage = (event: MessageEvent<Float32Array>) => this.onSamples(event.data);
     source.connect(this.node);
