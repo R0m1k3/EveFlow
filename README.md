@@ -112,6 +112,10 @@ mcp_servers:
 
 Sans secret, EveFlow n'écoute qu'en local (`127.0.0.1`) ; définissez un secret dans Paramètres → Webhook pour un Hermes distant. Outils exposés : `capture_screen`, `lock_session`, `open_app`, `open_url`, `media_key`, `clipboard_get`, `clipboard_set`, `find_files`, `speak_text`, `notify_user`, `set_hud_state`, `get_app_status`, `get_conversation_history`, `show_message`.
 
+### L'URL répond par une page web ?
+
+Si « Tester la liaison » signale « Le serveur renvoie une page web … au lieu de l'API Hermes », l'URL saisie pointe vers un portail (page de connexion, tableau de bord) et non vers le serveur API. EveFlow cherche alors automatiquement l'API sur le même hôte (port 8642, chemins `/api` et `/v1`, sous-domaines `api.` ou `hermes.`) et corrige l'URL s'il la trouve. Sinon, ouvrez le port 8642 du serveur Hermes ou exposez-le sur un chemin dédié de votre proxy, sans authentification web devant lui (la clé `API_SERVER_KEY` suffit).
+
 ## Développement
 
 ```bash

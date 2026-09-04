@@ -31,6 +31,63 @@ const isRec = (v: unknown): v is Rec => !!v && typeof v === 'object' && !Array.i
 
 export type ResolvedTransport = Exclude<HermesTransport, 'auto'>;
 
+/**
+ * A web page (login portal, dashboard, reverse-proxy error) instead of JSON means the URL does not
+ * point at the Hermes API. Returns a human explanation, or null when the body is not HTML.
+ */
+export function describeHtml(body: string): string | null {
+  const head = body.slice(0, 600).trimStart().toLowerCase();
+  if (!head.startsWith('<!doctype html') && !head.startsWith('<html') && !/^<\?xml[^>]*>\s*<html/.test(head)) return null;
+  const title = /<title[^>]*>([^<]{1,120})<\/title>/i.exec(body)?.[1]?.trim();
+  const login = /connecter|login|sign in|authentif|mot de passe|password/i.test(body.slice(0, 20_000));
+  return `Le serveur renvoie une page web${title ? ` « ${title} »` : ''} au lieu de l'API Hermes${login ? ' (page de connexion : l’URL passe par un portail web)' : ''}. Utilisez l'URL directe du serveur API Hermes (port 8642 par défaut, ou le chemin /v1 exposé par votre proxy).`;
+}
+
+/** Candidate API URLs derived from what the user typed (same host, other port or path). */
+export function hermesUrlCandidates(url: string): string[] {
+  const base = hermesBaseUrl(url);
+  if (!base) return [];
+  const out = new Set<string>();
+  const add = (u: string) => out.add(u.replace(/\/+$/, ''));
+  try {
+    const u = new URL(base.includes('://') ? base : `http://${base}`);
+    const host = u.hostname;
+    const scheme = u.protocol.replace(':', '');
+    const path = u.pathname.replace(/\/+$/, '');
+    if (path) add(`${scheme}://${u.host}`);
+    for (const suffix of ['/api', '/hermes', '/hermes/api', '/v1', '/api/v1']) add(`${scheme}://${u.host}${path}${suffix}`);
+    if (!u.port) {
+      add(`${scheme}://${host}:8642`);
+      add(`http://${host}:8642`);
+      add(`https://${host}:8642`);
+    }
+    for (const sub of ['api', 'hermes-api']) {
+      if (!host.startsWith(`${sub}.`) && host.includes('.')) add(`${scheme}://${sub}.${host}`);
+    }
+    if (host.startsWith('jarvis.')) add(`${scheme}://hermes.${host.slice('jarvis.'.length)}`);
+  } catch {
+    return [];
+  }
+  out.delete(base);
+  return [...out];
+}
+
+/** Probe candidate URLs until one answers Hermes JSON on /health or /v1/capabilities. */
+export async function discoverHermesUrl(config: HermesConfig, onProgress?: (url: string) => void): Promise<string | null> {
+  for (const candidate of hermesUrlCandidates(config.url)) {
+    onProgress?.(candidate);
+    const client = new HermesClient({ ...config, url: candidate });
+    try {
+      await client.request<unknown>('/health', { timeoutMs: 4000 });
+      return candidate;
+    } catch (err) {
+      if (err instanceof HttpError && (err.status === 401 || err.status === 403)) return candidate; // API found, key missing
+      continue;
+    }
+  }
+  return null;
+}
+
 export function hermesBaseUrl(url: string): string {
   let base = url.trim().replace(/\/+$/, '');
   base = base.replace(/\/chat\/completions$/, '');
@@ -93,7 +150,7 @@ export class HermesClient {
     return h;
   }
 
-  private async request<T>(path: string, init: { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown; timeoutMs?: number } = {}): Promise<T> {
+  async request<T>(path: string, init: { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown; timeoutMs?: number } = {}): Promise<T> {
     if (!this.config.url.trim()) throw new Error("URL Hermes non configurée.");
     const url = `${this.base}${path}`;
     const res = await httpFetch({
@@ -103,11 +160,13 @@ export class HermesClient {
       body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
       timeoutMs: init.timeoutMs ?? 20_000
     });
-    if (!res.ok) throw new HttpError(res.status, errorMessage(res.status, res.text ?? ''), res.text);
     const text = res.text ?? '';
+    const html = describeHtml(text);
+    if (html) throw new HttpError(res.status, html, text);
+    if (!res.ok) throw new HttpError(res.status, errorMessage(res.status, res.text ?? ''), res.text);
     if (!text.trim()) return null as T;
     const parsed = tryParseJson<T>(text);
-    if (parsed === null) throw new Error(`Réponse Hermes illisible depuis ${path}`);
+    if (parsed === null) throw new Error(`Réponse Hermes illisible depuis ${path} : ${text.slice(0, 120).replace(/\s+/g, ' ')}`);
     return parsed;
   }
 
@@ -520,6 +579,8 @@ export class HermesClient {
 export function recoverCompletion(raw: string): { text?: string; error?: string } {
   const body = raw.trim();
   if (!body) return {};
+  const html = describeHtml(body);
+  if (html) return { error: html };
   const candidates = body.startsWith('data:') || body.startsWith('event:')
     ? body.split(/\n+/).filter((l) => l.startsWith('data:')).map((l) => l.replace(/^data:\s*/, '')).filter((l) => l && l !== '[DONE]')
     : [body];
