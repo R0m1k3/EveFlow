@@ -125,6 +125,7 @@ export const DEFAULT_SETTINGS: Settings = {
     volume: 1,
     localModel: 'kokoro-v1',
     localSpeaker: 30,
+    voiceGender: 'male',
     autoSpeak: true,
     speakIncoming: true
   },

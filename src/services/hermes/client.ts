@@ -430,6 +430,7 @@ export class HermesClient {
       let iterationText = '';
       const errorChunks: string[] = [];
       let ready = false;
+      let rawBody = '';
       const parser = new SseParser((message) => {
         if (message.data === '[DONE]') return;
         const data = tryParseJson<unknown>(message.data);
@@ -451,7 +452,13 @@ export class HermesClient {
       if (sessionId) headers['X-Hermes-Session-Id'] = sessionId;
       const handle = await httpStream(
         { url: `${this.base}/v1/chat/completions`, method: 'POST', headers, body: JSON.stringify(payload), timeoutMs: 10 * 60_000 },
-        { onChunk: (text) => (ready ? parser.feed(text) : errorChunks.push(text)) }
+        {
+          onChunk: (text) => {
+            if (rawBody.length < 512_000) rawBody += text;
+            if (ready) parser.feed(text);
+            else errorChunks.push(text);
+          }
+        }
       );
       currentHandle = handle;
       if (!handle.start.ok) {
@@ -474,6 +481,17 @@ export class HermesClient {
 
       await handle.done;
       parser.end();
+      if (!iterationText && toolCalls.size === 0 && !aborted()) {
+        // Nothing streamed: the server may have answered with a plain JSON completion (stream ignored)
+        // or with a 200 carrying an error object. Surface it instead of an empty bubble.
+        const recovered = recoverCompletion(rawBody);
+        if (recovered.text) {
+          iterationText = recovered.text;
+          onEvent({ kind: 'delta', text: recovered.text });
+        } else {
+          throw new Error(recovered.error ?? `Réponse vide de Hermes (${rawBody.length} octets reçus${rawBody ? ` : ${rawBody.slice(0, 160).replace(/\s+/g, ' ')}` : ''})`);
+        }
+      }
       fullText += iterationText;
 
       if (finishReason === 'tool_calls' && toolsAllowed && toolCalls.size > 0 && !aborted()) {
@@ -496,6 +514,30 @@ export class HermesClient {
     onEvent({ kind: 'completed', status: aborted() ? 'cancelled' : 'completed', text: fullText });
     return fullText;
   }
+}
+
+/** Extract text or an error message from a non-streamed chat completion body. */
+export function recoverCompletion(raw: string): { text?: string; error?: string } {
+  const body = raw.trim();
+  if (!body) return {};
+  const candidates = body.startsWith('data:') || body.startsWith('event:')
+    ? body.split(/\n+/).filter((l) => l.startsWith('data:')).map((l) => l.replace(/^data:\s*/, '')).filter((l) => l && l !== '[DONE]')
+    : [body];
+  let text = '';
+  for (const c of candidates) {
+    const data = tryParseJson<Rec>(c);
+    if (!data || !isRec(data)) continue;
+    if (data.error) {
+      const e = data.error as Rec | string;
+      return { error: `Hermes : ${typeof e === 'string' ? e : String((e as Rec).message ?? JSON.stringify(e))}` };
+    }
+    const choice = Array.isArray(data.choices) && isRec(data.choices[0]) ? (data.choices[0] as Rec) : null;
+    const msg = choice && isRec(choice.message) ? (choice.message as Rec) : choice && isRec(choice.delta) ? (choice.delta as Rec) : null;
+    if (msg && typeof msg.content === 'string') text += msg.content;
+    else if (typeof data.output === 'string') text += data.output;
+    else if (typeof data.text === 'string') text += data.text;
+  }
+  return text ? { text } : {};
 }
 
 /** Session ids created by the sessions transport carry an `hs:` prefix; other endpoints get the bare id. */

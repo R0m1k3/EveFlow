@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chunkForSpeech, cleanForSpeech, extractSentences, preprocessMedia } from '../src/lib/text';
+import { chunkForSpeech, cleanForSpeech, extractSentences, isTranscriptNoise, preprocessMedia } from '../src/lib/text';
 
 describe('text', () => {
   it('cleans markdown for speech', () => {
@@ -23,5 +23,20 @@ describe('text', () => {
     const chunks = chunkForSpeech('mot '.repeat(200), 100);
     expect(chunks.every((c) => c.length <= 100)).toBe(true);
     expect(preprocessMedia('MEDIA:/tmp/a.png')).toContain('![image](/tmp/a.png)');
+  });
+});
+
+describe('isTranscriptNoise', () => {
+  it('drops Whisper hallucinations on silence', () => {
+    expect(isTranscriptNoise('(cliquant)')).toBe(true);
+    expect(isTranscriptNoise('*Claire*')).toBe(true);
+    expect(isTranscriptNoise('[Musique]')).toBe(true);
+    expect(isTranscriptNoise('...')).toBe(true);
+    expect(isTranscriptNoise("Sous-titres réalisés par la communauté d'Amara.org")).toBe(true);
+  });
+  it('keeps real sentences', () => {
+    expect(isTranscriptNoise('Jarvis, allume la lumière du salon.')).toBe(false);
+    expect(isTranscriptNoise('(Jarvis) quelle heure est-il maintenant ?')).toBe(false);
+    expect(isTranscriptNoise('Oui')).toBe(false);
   });
 });

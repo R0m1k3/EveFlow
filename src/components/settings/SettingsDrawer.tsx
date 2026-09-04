@@ -4,6 +4,7 @@ import { bridge } from '../../lib/bridge';
 import { HermesClient } from '../../services/hermes/client';
 import { listSystemVoices } from '../../services/voice/tts';
 import { speech } from '../../services/voice/speech';
+import { ensurePreferredVoice } from '../../services/voice/voicePreference';
 import { listMicrophones } from '../../services/voice/capture';
 import { transcribeWav } from '../../services/voice/stt';
 import { encodeWav } from '../../services/voice/wav';
@@ -357,6 +358,14 @@ export function SettingsDrawer({ onClose }: Props) {
 
         {section === 'speech' && (
           <div className="card">
+            <div className="field">
+              <label>Voix</label>
+              <div className="segmented">
+                <button className={(settings.speech.voiceGender ?? 'male') === 'male' ? 'active' : ''} onClick={() => { update({ speech: { voiceGender: 'male' } }); void ensurePreferredVoice().then((m) => m && setTtsTest({ status: 'ok', message: m })); }}>Masculine</button>
+                <button className={settings.speech.voiceGender === 'female' ? 'active' : ''} onClick={() => { update({ speech: { voiceGender: 'female' } }); void ensurePreferredVoice().then((m) => m && setTtsTest({ status: 'ok', message: m })); }}>Féminine</button>
+              </div>
+              <span className="hint">S’applique à tous les moteurs : voix locale (Piper Tom ou Pierre pour le masculin, téléchargée automatiquement si besoin), voix OpenAI (onyx / nova), voix système Windows (Paul / Hortense).</span>
+            </div>
             <div className="field">
               <label>Moteur de synthèse</label>
               <select className="select" value={settings.speech.provider} onChange={(e) => update({ speech: { provider: e.target.value as typeof settings.speech.provider } })}>

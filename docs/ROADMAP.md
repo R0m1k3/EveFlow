@@ -77,6 +77,7 @@ Sources : [jarvis-desktop-ai](https://github.com/ccarloshenri/jarvis-desktop-ai)
 | Silero VAD sur phrase Kokoro de 2,3 s (2.3.0) | un seul segment, début et fin détectés, 6,7 s d'audio traités en 190 ms |
 | Capture d'écran → Hermes (2.3.0) | JPEG de 107 ko reçu côté Hermes (mock chat completions) |
 | Intention locale « coupe le son » (2.3.0) | traitée sans Hermes, résultat affiché dans le fil |
+| Correctifs 2.4.0.1 | réponse vide en chat completions désormais expliquée (JSON non streamé ou erreur HTTP 200), la liaison ne passe plus en « dégradé » quand seule l'API des crons échoue, transcriptions parasites (« (cliquant) », « *Claire* ») ignorées, préférence de voix masculine/féminine |
 | Serveur MCP (2.4.0) | initialize, tools/list (14 outils), tools/call côté principal (presse-papiers, capture image) et côté renderer (état, message dans le fil) |
 
 Sur un PC à 28 cœurs les temps sont nettement plus courts. Whisper small est maintenant recommandé pour le français.

@@ -5,6 +5,7 @@ import { bridge } from './lib/bridge';
 import { Log } from './lib/log';
 import { handlePush, localToolContext, stopGeneration } from './services/conversation';
 import { initMcpBridge } from './services/mcpBridge';
+import { ensurePreferredVoice } from './services/voice/voicePreference';
 import { isQuietTime } from './lib/quietHours';
 import { speech } from './services/voice/speech';
 import { voiceController } from './services/voice/voiceController';
@@ -45,7 +46,7 @@ function useBoot(): boolean {
       }
       if (api) {
         disposers.push(useVoiceModels.getState().subscribe());
-        void useVoiceModels.getState().refresh();
+        void useVoiceModels.getState().refresh().then(() => ensurePreferredVoice());
         if (settings.voice.wakeMode === 'kws') void voiceController.startWakeMode();
         let lastWake = JSON.stringify([settings.voice.wakeMode, settings.voice.wakeWord, settings.voice.kwsSensitivity, settings.voice.micDeviceId]);
         disposers.push(

@@ -7,6 +7,8 @@ export interface VoiceSpeaker {
   id: number;
   name: string;
   lang: string;
+  /** m = masculine, f = feminine (from the catalog label). */
+  gender?: 'm' | 'f';
 }
 
 export interface VoiceModelSpec {

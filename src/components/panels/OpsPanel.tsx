@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import {
+  AlertTriangle,
   Wrench, CalendarClock, Sparkles, Layers, History, Play, Pause, Trash2, Pencil, Plus, Save, X, RefreshCw,
   CheckCircle2, XCircle, Loader2, Bot, Cpu, GitBranch, Webhook, FolderOpen
 } from 'lucide-react';
@@ -41,6 +42,7 @@ function ActivityTab() {
 
 function JobsTab() {
   const jobs = useHermes((s) => s.jobs);
+  const jobsError = useHermes((s) => s.jobsError);
   const busy = useHermes((s) => s.busy);
   const lastSyncAt = useHermes((s) => s.lastSyncAt);
   const refreshJobs = useHermes((s) => s.refreshJobs);
@@ -95,8 +97,9 @@ function JobsTab() {
           </div>
         </div>
       )}
+      {jobsError && <div className="test-result fail" style={{ marginBottom: 8 }}><AlertTriangle size={13} /> Crons indisponibles : {jobsError}</div>}
       {jobs.length === 0 ? (
-        <div className="empty">Aucun cron Hermes. Créez une mission planifiée en langage naturel.</div>
+        <div className="empty">{jobsError ? 'La liaison Hermes reste utilisable ; seule la planification est indisponible.' : 'Aucun cron Hermes. Créez une mission planifiée en langage naturel.'}</div>
       ) : (
         <div className="list">
           {jobs.map((job) => {

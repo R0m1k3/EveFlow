@@ -4,6 +4,7 @@
  * OpenAI-compatible /v1/audio/speech, system voices, and the legacy Google Translate endpoint.
  */
 import { Log } from '../../lib/log';
+import { defaultOpenAiVoice, rankSystemVoice } from '../../lib/voicePreference';
 import { bridge } from '../../lib/bridge';
 import { chunkForSpeech, cleanForSpeech, extractSentences } from '../../lib/text';
 import { httpFetch } from '../../lib/transport';
@@ -26,6 +27,8 @@ export interface TtsConfig {
   localModel: string;
   /** Speaker id inside the local model. */
   localSpeaker: number;
+  /** Preferred voice gender, applied to every provider's default voice. */
+  voiceGender?: 'male' | 'female';
 }
 
 export type TtsState = 'idle' | 'loading' | 'speaking';
@@ -201,7 +204,7 @@ export class TtsEngine {
       body: JSON.stringify({
         model: model || 'tts-1',
         input: text,
-        voice: voice || 'alloy',
+        voice: voice || defaultOpenAiVoice(this.config.voiceGender ?? 'male'),
         speed: Math.max(0.5, Math.min(2, speed || 1)),
         response_format: format || 'mp3'
       }),
@@ -312,8 +315,8 @@ export class TtsEngine {
       if (exact) return exact;
     }
     const lang = (this.config.language || 'fr').toLowerCase().split('-')[0];
-    const candidates = voices.filter((v) => v.lang.toLowerCase().startsWith(lang));
-    return candidates.sort((a, b) => scoreVoice(b) - scoreVoice(a))[0] ?? voices[0];
+    const gender = this.config.voiceGender ?? 'male';
+    return [...voices].sort((a, b) => rankSystemVoice(b, lang, gender) - rankSystemVoice(a, lang, gender))[0];
   }
 }
 
