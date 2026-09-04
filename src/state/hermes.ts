@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { WebhookStatus } from '../../shared/ipc';
 import { Log } from '../lib/log';
 import { persistGet, persistSet } from '../lib/persist';
-import { HermesClient, jobOutput, jobStatus, resolveTransport, type ResolvedTransport } from '../services/hermes/client';
+import { HermesClient, jobOutput, jobStatus, resolveTransport, type ResolvedTransport, discoverHermesUrl } from '../services/hermes/client';
 import type {
   HermesCapabilities,
   HermesHealth,
@@ -40,6 +40,8 @@ interface HermesStore {
   jobRuns: JobRun[];
   /** Last cron sync failure (the chat link stays independent of it). */
   jobsError: string | null;
+  /** True while probing alternative API URLs after a failed connection. */
+  discovering: boolean;
   transport: ResolvedTransport;
   lastSyncAt: number | null;
   webhook: WebhookStatus | null;
@@ -91,6 +93,7 @@ export const useHermes = create<HermesStore>((set, get) => ({
   jobs: [],
   jobRuns: [],
   jobsError: null,
+  discovering: false,
   transport: 'completions',
   lastSyncAt: null,
   webhook: null,
@@ -130,6 +133,22 @@ export const useHermes = create<HermesStore>((set, get) => ({
       void get().refreshSessions();
     } catch (err) {
       const message = (err as Error).message;
+      // The URL answers with a web page (portal, dashboard) or nothing: look for the API on the same host.
+      if (!get().discovering && /page web|illisible|fetch failed|ECONNREFUSED|404/i.test(message)) {
+        set({ discovering: true, linkDetail: 'recherche de l’API Hermes…' });
+        try {
+          const found = await discoverHermesUrl(config);
+          if (found) {
+            Log.info('hermes', `API found at ${found} (was ${config.url})`);
+            useSettings.getState().update({ hermes: { url: found } });
+            set({ discovering: false, linkDetail: `URL corrigée automatiquement : ${found}` });
+            await get().connect();
+            return;
+          }
+        } finally {
+          set({ discovering: false });
+        }
+      }
       set({ link: 'offline', linkDetail: message, transport: resolveTransport(config, null) });
       Log.warn('hermes', `connection failed: ${message}`);
     }

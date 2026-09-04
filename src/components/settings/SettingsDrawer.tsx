@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { X, Settings, CheckCircle2, XCircle, Loader2, Mic, Volume2, RotateCcw, Play } from 'lucide-react';
 import { bridge } from '../../lib/bridge';
-import { HermesClient } from '../../services/hermes/client';
+import { HermesClient, discoverHermesUrl, hermesUrlCandidates } from '../../services/hermes/client';
 import { listSystemVoices } from '../../services/voice/tts';
 import { speech } from '../../services/voice/speech';
 import { ensurePreferredVoice } from '../../services/voice/voicePreference';
@@ -116,7 +116,16 @@ export function SettingsDrawer({ onClose }: Props) {
       setHermesTest({ status: 'ok', message: `${health.status} (${via})${caps}` });
       void hermesConnect();
     } catch (err) {
-      setHermesTest({ status: 'fail', message: (err as Error).message });
+      const message = (err as Error).message;
+      setHermesTest({ status: 'running', message: `${message} — recherche de l’API sur le même hôte…` });
+      const found = await discoverHermesUrl(settings.hermes, (u) => setHermesTest({ status: 'running', message: `essai ${u}…` })).catch(() => null);
+      if (found) {
+        update({ hermes: { url: found } });
+        setHermesTest({ status: 'ok', message: `API Hermes trouvée : ${found} (URL corrigée automatiquement). Relancez le test.` });
+        void hermesConnect();
+      } else {
+        setHermesTest({ status: 'fail', message: `${message} Aucune API trouvée sur ${hermesUrlCandidates(settings.hermes.url).slice(0, 4).join(', ')}…` });
+      }
     }
   };
 
