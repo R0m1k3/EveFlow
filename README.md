@@ -1,7 +1,7 @@
 # EveFlow 2 — Interface vocale JARVIS pour Hermes Agent
 
 [![Build](https://img.shields.io/github/actions/workflow/status/R0m1k3/EveFlow/windows-release.yml?style=flat-square)](https://github.com/R0m1k3/EveFlow/actions)
-[![Version](https://img.shields.io/badge/version-2.4.0-brightgreen.svg?style=flat-square)](https://github.com/R0m1k3/EveFlow/releases)
+[![Version](https://img.shields.io/badge/version-2.4.1-brightgreen.svg?style=flat-square)](https://github.com/R0m1k3/EveFlow/releases)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey.svg?style=flat-square)](LICENSE)
 
 **EveFlow** est un compagnon de bureau Windows qui transforme [Hermes Agent](https://hermes-agent.nousresearch.com/) en assistant vocal à la JARVIS : un noyau holographique réactif au son, une conversation en streaming, les outils, sous-agents, approbations, crons, skills et sessions d'Hermes pilotés depuis un seul HUD.
@@ -30,6 +30,8 @@ La version 2 est une réécriture complète : plus de robot 3D, un pipeline voca
 * **Heures calmes et priorités** : plage horaire pendant laquelle les messages poussés s'affichent sans être lus ni faire clignoter le noyau (badge « non lus » à la place), thème nuit automatique, mots prioritaires lus quand même, résumé vocal des rapports longs (les premières phrases seulement).
 * **Mode mission** : un bouton dans la barre de commande bascule sur un second modèle Hermes (plus puissant) pour les tâches longues ; le modèle rapide reste utilisé pour la conversation courante.
 * **Widget compact « glanceable »** : état (veille, écoute, réflexion, parle), dernière phrase de l'assistant, badge de non-lus, indicateurs heures calmes et mission.
+* **Voix JARVIS** : préréglage en un clic (Paramètres → Voix) : voix française masculine locale (Piper Tom, téléchargée automatiquement), timbre « JARVIS » (légèrement plus grave et posé, chaleur, présence, courte réverbération d'intercom), débit calme. Kokoro n'a pas de voix française masculine.
+* **Reconnaissance française de référence** : Parakeet TDT 0.6B v3 (NVIDIA NeMo, 25 langues européennes) dans le catalogue, plus précis et bien plus rapide que Whisper sur processeur, avec ponctuation. Whisper base/small/turbo restent disponibles.
 * **Voix masculine ou féminine** : un réglage unique (Paramètres → Voix) appliqué à tous les moteurs. En local, Piper Tom ou Pierre (UPMC) pour le masculin, téléchargé automatiquement si aucune voix masculine n'est installée ; onyx / nova pour les API compatibles OpenAI ; Paul / Hortense pour les voix Windows.
 * **Barge-in** : en mains libres, parler par-dessus l'assistant coupe sa voix ; le seuil est relevé pendant qu'il parle pour ignorer l'écho du haut-parleur.
 * **Écoute permanente** : un détecteur de mot-clé de 3 Mo (sherpa-onnx, keyword spotting) tourne en continu sur le micro, quasi gratuit en CPU. « Jarvis » (ou n'importe quel mot-clé) ouvre l'écoute, « Jarvis, allume… » envoie directement la commande, et le mot coupe la voix en cours. Alternative : filtre du mot après transcription en mains libres.

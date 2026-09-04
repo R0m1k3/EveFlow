@@ -77,6 +77,7 @@ Sources : [jarvis-desktop-ai](https://github.com/ccarloshenri/jarvis-desktop-ai)
 | Silero VAD sur phrase Kokoro de 2,3 s (2.3.0) | un seul segment, début et fin détectés, 6,7 s d'audio traités en 190 ms |
 | Capture d'écran → Hermes (2.3.0) | JPEG de 107 ko reçu côté Hermes (mock chat completions) |
 | Intention locale « coupe le son » (2.3.0) | traitée sans Hermes, résultat affiché dans le fil |
+| Voix JARVIS et Parakeet (2.4.1) | timbre JARVIS (Web Audio : pitch, EQ, compression, réverbération courte), préréglage voix masculine française, Parakeet TDT v3 pour le français, worklets audio livrés en fichiers statiques (l'écoute permanente échouait sous la CSP stricte en version installée), rembourrage de silence avant la reconnaissance |
 | Correctif 2.4.0.3 | un portail qui laisse passer /health mais renvoie une page web sur /v1 est traité comme une liaison en échec et déclenche la recherche de l'API (sondes /v1/capabilities, /v1/models) |
 | Correctif 2.4.0.2 | une page web (portail de connexion) reçue à la place de l'API Hermes est reconnue et expliquée ; l'API est recherchée automatiquement sur le même hôte (port 8642, /api, hermes.…) et l'URL corrigée |
 | Correctifs 2.4.0.1 | réponse vide en chat completions désormais expliquée (JSON non streamé ou erreur HTTP 200), la liaison ne passe plus en « dégradé » quand seule l'API des crons échoue, transcriptions parasites (« (cliquant) », « *Claire* ») ignorées, préférence de voix masculine/féminine |

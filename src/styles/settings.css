@@ -115,3 +115,35 @@
   text-align: left;
   font: inherit;
 }
+
+/* Segmented choice (voice gender, capture mode…) */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.03);
+}
+.segmented button {
+  padding: 8px 16px;
+  background: transparent;
+  border: none;
+  color: var(--ink-1);
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.segmented button + button {
+  border-left: 1px solid var(--line);
+}
+.segmented button:hover {
+  color: var(--ink-0);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+.segmented button.active {
+  color: #03101c;
+  background: var(--accent);
+  font-weight: 600;
+}

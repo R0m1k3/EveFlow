@@ -45,11 +45,24 @@ export const VOICE_CATALOG: VoiceModelSpec[] = [
     recommended: true
   },
   {
+    id: 'parakeet-v3',
+    kind: 'stt',
+    engine: 'nemo-transducer',
+    name: 'Parakeet TDT 0.6B v3 (25 langues européennes, français)',
+    description: 'Le plus précis en français et nettement plus rapide que Whisper sur processeur (NVIDIA NeMo, int8). Ponctuation et majuscules incluses.',
+    languages: ['fr', 'en', 'de', 'es', 'it', 'multi'],
+    sizeMb: 640,
+    url: `${ASR}/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2`,
+    dir: 'sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8',
+    files: ['encoder.int8.onnx', 'decoder.int8.onnx', 'joiner.int8.onnx', 'tokens.txt'],
+    recommended: true
+  },
+  {
     id: 'whisper-turbo',
     kind: 'stt',
     engine: 'whisper',
     name: 'Whisper large-v3 turbo (multilingue)',
-    description: 'La meilleure précision ; demande un processeur puissant.',
+    description: 'Très bonne précision multilingue ; 2 à 4 s par phrase sur un processeur récent. Parakeet est plus rapide en français.',
     languages: ['fr', 'en', 'multi'],
     sizeMb: 564,
     url: `${ASR}/sherpa-onnx-whisper-turbo.tar.bz2`,

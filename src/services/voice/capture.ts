@@ -66,6 +66,21 @@ function getWorkletUrl(): string {
   return workletUrl;
 }
 
+/**
+ * Load an AudioWorklet module: first the static file shipped with the app (allowed by the strict
+ * CSP, script-src 'self'), then a blob URL for dev servers that do not serve /worklets.
+ */
+export async function loadWorklet(ctx: AudioContext, name: string, blobUrl: () => string): Promise<void> {
+  const staticUrl = new URL(`worklets/${name}.js`, document.baseURI).href;
+  try {
+    await ctx.audioWorklet.addModule(staticUrl);
+    return;
+  } catch (err) {
+    Log.debug('audio', `static worklet ${name} unavailable (${(err as Error).message}), trying blob`);
+  }
+  await ctx.audioWorklet.addModule(blobUrl());
+}
+
 export async function listMicrophones(): Promise<MicDevice[]> {
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -147,7 +162,7 @@ export class MicCapture {
     audioBus.setInputAnalyser(analyser);
 
     try {
-      await this.ctx.audioWorklet.addModule(getWorkletUrl());
+      await loadWorklet(this.ctx, 'eveflow-capture', getWorkletUrl);
       this.worklet = new AudioWorkletNode(this.ctx, 'eveflow-capture', { numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1 });
       this.worklet.port.onmessage = (event: MessageEvent<Float32Array>) => this.onSamples(event.data);
       source.connect(this.worklet);

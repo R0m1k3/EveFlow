@@ -379,8 +379,13 @@ function handle(req: Request): unknown {
       // Audio crosses the process boundary as base64: V8 refuses to serialize external buffers.
       const bytes = typeof req.wav === 'string' ? new Uint8Array(Buffer.from(req.wav, 'base64')) : req.wav;
       const { samples, sampleRate } = decodeWav(bytes);
-      const pcm = resampleTo16k(samples, sampleRate);
-      if (pcm.length < 1600) throw new Error('Audio trop court');
+      const raw = resampleTo16k(samples, sampleRate);
+      if (raw.length < 1600) throw new Error('Audio trop court');
+      // 0.4 s of silence on both sides: utterances cut close to the words lose the first/last syllable
+      // and short clips make Whisper hallucinate.
+      const pad = 6400;
+      const pcm = new Float32Array(raw.length + 2 * pad);
+      pcm.set(raw, pad);
       const recognizer = getRecognizer(req.model, req.language);
       const stream = recognizer.createStream();
       stream.acceptWaveform({ sampleRate: 16000, samples: pcm });

@@ -29,6 +29,8 @@ export interface TtsConfig {
   localSpeaker: number;
   /** Preferred voice gender, applied to every provider's default voice. */
   voiceGender?: 'male' | 'female';
+  /** 'jarvis' adds a subtle AI timbre: slightly lower pitch, warm/crisp EQ, short room reverb. */
+  timbre?: 'natural' | 'jarvis';
 }
 
 export type TtsState = 'idle' | 'loading' | 'speaking';
@@ -255,7 +257,13 @@ export class TtsEngine {
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       if (this.config.provider === 'google-free') source.playbackRate.value = Math.max(0.5, Math.min(2, this.config.speed || 1));
-      source.connect(audioBus.output);
+      if (this.config.timbre === 'jarvis') {
+        // Slightly lower and calmer, warm low end, crisp presence, a touch of room: the film's intercom feel.
+        source.playbackRate.value *= 0.94;
+        source.connect(jarvisChain(ctx));
+      } else {
+        source.connect(audioBus.output);
+      }
       const finish = () => {
         if (this.cancelCurrent === cancel) this.cancelCurrent = null;
         resolve();
@@ -333,4 +341,61 @@ export function scoreVoice(v: SpeechSynthesisVoice): number {
 export function listSystemVoices(): SpeechSynthesisVoice[] {
   if (typeof speechSynthesis === 'undefined') return [];
   return [...speechSynthesis.getVoices()].sort((a, b) => a.lang.localeCompare(b.lang) || scoreVoice(b) - scoreVoice(a));
+}
+
+let jarvisInput: AudioNode | null = null;
+let jarvisCtx: AudioContext | null = null;
+
+/** Shared effect chain for the JARVIS timbre (built once per AudioContext). */
+function jarvisChain(ctx: AudioContext): AudioNode {
+  if (jarvisInput && jarvisCtx === ctx) return jarvisInput;
+  const input = ctx.createGain();
+  const warmth = ctx.createBiquadFilter();
+  warmth.type = 'lowshelf';
+  warmth.frequency.value = 180;
+  warmth.gain.value = 3.5;
+  const presence = ctx.createBiquadFilter();
+  presence.type = 'peaking';
+  presence.frequency.value = 3200;
+  presence.Q.value = 0.9;
+  presence.gain.value = 2.5;
+  const air = ctx.createBiquadFilter();
+  air.type = 'highshelf';
+  air.frequency.value = 7000;
+  air.gain.value = -2;
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -20;
+  comp.ratio.value = 3;
+  comp.attack.value = 0.005;
+  comp.release.value = 0.12;
+  const dry = ctx.createGain();
+  dry.gain.value = 0.86;
+  const wet = ctx.createGain();
+  wet.gain.value = 0.14;
+  const reverb = ctx.createConvolver();
+  reverb.buffer = impulse(ctx, 0.22, 3.2);
+  input.connect(warmth);
+  warmth.connect(presence);
+  presence.connect(air);
+  air.connect(comp);
+  comp.connect(dry);
+  comp.connect(reverb);
+  reverb.connect(wet);
+  dry.connect(audioBus.output);
+  wet.connect(audioBus.output);
+  jarvisInput = input;
+  jarvisCtx = ctx;
+  return input;
+}
+
+/** Short synthetic room impulse (exponentially decaying noise). */
+function impulse(ctx: AudioContext, seconds: number, decay: number): AudioBuffer {
+  const rate = ctx.sampleRate;
+  const length = Math.max(1, Math.floor(rate * seconds));
+  const buffer = ctx.createBuffer(2, length, rate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = buffer.getChannelData(ch);
+    for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+  }
+  return buffer;
 }
