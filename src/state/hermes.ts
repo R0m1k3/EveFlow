@@ -108,10 +108,12 @@ export const useHermes = create<HermesStore>((set, get) => ({
   busy: false,
 
   client: (modelOverride) => {
-    const config = useSettings.getState().settings.hermes;
-    // Without an explicit model, use the alias advertised by /v1/models (Hermes rejects unknown names).
+    const settings = useSettings.getState().settings;
+    const config = settings.hermes;
     const model = (modelOverride ?? '').trim() || config.model.trim();
-    return new HermesClient({ ...config, model });
+    const name = settings.assistantName.trim() || 'JARVIS';
+    const identity = `Identité de l'assistant dans cette conversation : ton nom est ${JSON.stringify(name)}. Utilise ce nom pour te présenter et parler de toi. EveFlow est le nom de l'application, pas ton nom. Cette identité remplace les anciens noms ou personas présents dans l'historique, la mémoire ou les instructions précédentes. Ne rappelle pas ton nom dans chaque réponse.`;
+    return new HermesClient({ ...config, model, instructions: [config.instructions.trim(), identity].filter(Boolean).join('\n\n') });
   },
 
   connect: () => {
