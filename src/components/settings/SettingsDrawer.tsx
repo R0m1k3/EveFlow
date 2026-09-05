@@ -15,6 +15,7 @@ import { DEFAULT_SETTINGS, useSettings, type HudTheme } from '../../state/settin
 import { useVoice } from '../../state/voice';
 import { installedModels, useVoiceModels } from '../../state/voiceModels';
 import { ModelsSection } from './ModelsSection';
+import { ModelSelect } from './ModelSelect';
 
 type Section = 'general' | 'hermes' | 'voice' | 'speech' | 'models' | 'webhook' | 'notifications' | 'ui';
 
@@ -78,6 +79,9 @@ export function SettingsDrawer({ onClose }: Props) {
   const update = useSettings((s) => s.update);
   const reset = useSettings((s) => s.reset);
   const hermesModels = useHermes((s) => s.models);
+  const modelsLoading = useHermes((s) => s.modelsLoading);
+  const modelsError = useHermes((s) => s.modelsError);
+  const refreshHermesModels = useHermes((s) => s.refreshModels);
   const hermesWebhook = useHermes((s) => s.webhook);
   const hermesConnect = useHermes((s) => s.connect);
   const micDevices = useVoice((s) => s.micDevices);
@@ -90,6 +94,13 @@ export function SettingsDrawer({ onClose }: Props) {
   const [voices, setVoices] = useState(listSystemVoices());
   const [edgeVoices, setEdgeVoices] = useState<EdgeVoice[]>([]);
   const [webhookSecretVisible, setWebhookSecretVisible] = useState(false);
+
+  useEffect(() => {
+    if (section !== 'hermes') return;
+    useHermes.setState({ models: [], modelsError: null });
+    const timer = setTimeout(() => void refreshHermesModels(), 500);
+    return () => clearTimeout(timer);
+  }, [section, settings.hermes.url, settings.hermes.apiKey, settings.hermes.sessionKey, refreshHermesModels]);
 
   const speechProvider = settings.speech.provider;
   useEffect(() => {
@@ -206,17 +217,19 @@ export function SettingsDrawer({ onClose }: Props) {
                 <input className="input" type="password" value={settings.hermes.apiKey} onChange={(e) => update({ hermes: { apiKey: e.target.value } })} />
               </div>
               <div className="grid-2">
-                <div className="field">
-                  <label>Modèle</label>
-                  <input className="input" list="hermes-models" value={settings.hermes.model} placeholder="(défaut du serveur)" onChange={(e) => update({ hermes: { model: e.target.value } })} />
-                  <datalist id="hermes-models">
-                    {hermesModels.map((m) => <option key={m.id} value={m.id} />)}
-                  </datalist>
-                </div>
+                <ModelSelect label="Modèle IA" models={hermesModels} value={settings.hermes.model} defaultLabel="Défaut du serveur" onChange={(model) => update({ hermes: { model } })} />
                 <div className="field">
                   <label>Clé de mémoire (X-Hermes-Session-Key)</label>
                   <input className="input" value={settings.hermes.sessionKey} onChange={(e) => update({ hermes: { sessionKey: e.target.value } })} />
                 </div>
+              </div>
+              <div className="field">
+                <button className="btn small" disabled={modelsLoading} onClick={() => void refreshHermesModels()}>
+                  {modelsLoading ? <Loader2 size={13} className="spin" /> : <RotateCcw size={13} />}
+                  {modelsLoading ? 'Chargement des modèles…' : 'Actualiser les modèles'}
+                </button>
+                <span className="hint" role="status">{modelsLoading ? 'Interrogation du serveur Hermes…' : modelsError || (hermesModels.length ? `${hermesModels.length} modèle(s) disponible(s).` : 'Aucun modèle annoncé par le serveur.')}</span>
+                <span className="hint">Cette liste contient les modèles exposés par votre serveur Hermes. Si seul « hermes-agent » apparaît, les autres modèles doivent être configurés et exposés côté serveur.</span>
               </div>
               <div className="grid-2">
                 <div className="field">
@@ -239,8 +252,7 @@ export function SettingsDrawer({ onClose }: Props) {
                 </div>
               </div>
               <div className="field">
-              <label>Modèle « mission » (tâches longues)</label>
-              <input className="input" list="hermes-models" value={settings.hermes.missionModel} placeholder="(même modèle)" onChange={(e) => update({ hermes: { missionModel: e.target.value } })} />
+              <ModelSelect label="Modèle mission (tâches longues)" models={hermesModels} value={settings.hermes.missionModel} defaultLabel="Même modèle que le principal" onChange={(missionModel) => update({ hermes: { missionModel } })} />
               <span className="hint">Utilisé quand le mode Mission est activé dans la barre de commande. Laissez vide pour garder le modèle principal.</span>
             </div>
             <div className="field">

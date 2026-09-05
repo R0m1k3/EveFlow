@@ -200,7 +200,21 @@ export class HermesClient {
 
   async models(): Promise<HermesModel[]> {
     const payload = await this.request<unknown>('/v1/models');
-    return extractArray<HermesModel>(payload, ['data', 'models']);
+    const readEntries = (value: unknown): unknown[] => {
+      if (Array.isArray(value)) return value;
+      if (isRec(value)) {
+        if (Array.isArray(value.models)) return value.models;
+        if (value.data !== undefined) return readEntries(value.data);
+      }
+      throw new Error('Le serveur a renvoyé une liste de modèles invalide.');
+    };
+    const entries = readEntries(payload);
+    const models = new Map<string, HermesModel>();
+    for (const entry of entries) {
+      const id = typeof entry === 'string' ? entry.trim() : isRec(entry) && typeof entry.id === 'string' ? entry.id.trim() : '';
+      if (id && !models.has(id)) models.set(id, { ...(isRec(entry) ? entry : {}), id });
+    }
+    return [...models.values()];
   }
 
   async skills(): Promise<HermesSkill[]> {

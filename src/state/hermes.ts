@@ -33,6 +33,9 @@ interface HermesStore {
   capabilities: HermesCapabilities | null;
   health: HermesHealth | null;
   models: HermesModel[];
+  modelsLoading: boolean;
+  modelsError: string | null;
+  refreshModels: () => Promise<void>;
   skills: HermesSkill[];
   toolsets: HermesToolset[];
   sessions: HermesSession[];
@@ -63,6 +66,7 @@ interface HermesStore {
 const CACHE_KEY = 'eveflow.hermes.cache.v2';
 let connectInflight: Promise<void> | null = null;
 let lastCacheSnapshot = '';
+let modelsRequest = 0;
 const isTerminal = (status: string) => ['ok', 'failed', 'delivery_failed', 'completed', 'error'].includes(status.toLowerCase());
 
 function runFromJob(job: HermesJob): JobRun | null {
@@ -87,6 +91,8 @@ export const useHermes = create<HermesStore>((set, get) => ({
   capabilities: null,
   health: null,
   models: [],
+  modelsLoading: false,
+  modelsError: null,
   skills: [],
   toolsets: [],
   sessions: [],
@@ -160,14 +166,32 @@ export const useHermes = create<HermesStore>((set, get) => ({
     return connectInflight;
   },
 
+  refreshModels: async () => {
+    const request = ++modelsRequest;
+    const config = useSettings.getState().settings.hermes;
+    const current = () => {
+      const now = useSettings.getState().settings.hermes;
+      return request === modelsRequest && now.url === config.url && now.apiKey === config.apiKey && now.sessionKey === config.sessionKey;
+    };
+    set({ models: [], modelsLoading: true, modelsError: null });
+    try {
+      const models = await new HermesClient(config).models();
+      if (current()) set({ models });
+    } catch (err) {
+      if (current()) set({ modelsError: (err as Error).message });
+    } finally {
+      if (request === modelsRequest) set({ modelsLoading: false });
+    }
+  },
+
   refreshCatalog: async () => {
     const client = get().client();
-    const [models, skills, toolsets] = await Promise.all([
-      client.models().catch(() => [] as HermesModel[]),
+    const [, skills, toolsets] = await Promise.all([
+      get().refreshModels(),
       client.skills().catch(() => [] as HermesSkill[]),
       client.toolsets().catch(() => [] as HermesToolset[])
     ]);
-    set({ models, skills, toolsets });
+    set({ skills, toolsets });
   },
 
   refreshSessions: async () => {
