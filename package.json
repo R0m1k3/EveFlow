@@ -1,7 +1,7 @@
 {
   "name": "eveflow",
-  "version": "2.5.3",
-  "releaseVersion": "2.5.3",
+  "version": "2.5.4",
+  "releaseVersion": "2.5.4",
   "description": "JARVIS-style desktop HUD for Hermes Agent: voice, streaming runs, scheduled jobs, skills and telemetry",
   "main": "dist-electron/main.js",
   "private": true,
