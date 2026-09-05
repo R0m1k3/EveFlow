@@ -89,7 +89,7 @@ export const DEFAULT_SETTINGS: Settings = {
     transport: 'auto',
     reasoningEffort: '',
     instructions:
-      "Tu es l'interface vocale EveFlow (style JARVIS). Réponds en français, de façon concise et orale quand la question est simple; utilise le Markdown uniquement pour le contenu structuré (code, listes, tableaux). Les images doivent être des URL http(s) ou des fichiers du dossier partagé.",
+      "Réponds en français, de façon concise et orale quand la question est simple; utilise le Markdown uniquement pour le contenu structuré (code, listes, tableaux). Les images doivent être des URL http(s) ou des fichiers du dossier partagé.",
     localTools: true,
     missionModel: ''
   },

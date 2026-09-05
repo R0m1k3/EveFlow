@@ -638,8 +638,9 @@ mcp_servers:
           <div className="card">
             <div className="grid-2">
               <div className="field">
-                <label>Nom de l’assistant</label>
-                <input className="input" value={settings.assistantName} onChange={(e) => update({ assistantName: e.target.value.toUpperCase().slice(0, 18) || 'JARVIS' })} />
+                <label htmlFor="assistant-name">Nom de l’assistant</label>
+                <input id="assistant-name" className="input" value={settings.assistantName} maxLength={60} placeholder="Jarvis, Nova, Alfred…" onChange={(e) => update({ assistantName: e.target.value })} onBlur={() => update({ assistantName: settings.assistantName.trim() || DEFAULT_SETTINGS.assistantName })} />
+                <span className="hint">Choisissez le nom que vous voulez. Il est sauvegardé automatiquement et utilisé par l’assistant dès votre prochain message, y compris dans la conversation en cours.</span>
               </div>
               <div className="field">
                 <label>Votre nom</label>

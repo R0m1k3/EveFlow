@@ -15,6 +15,23 @@ function respond(payload: unknown, status = 200) {
 afterEach(() => { vi.restoreAllMocks(); useSettings.setState({ settings: DEFAULT_SETTINGS }); });
 
 describe('Hermes models', () => {
+  it.each(['runs', 'sessions', 'completions'] as const)('sends the configured assistant identity over %s, including after a rename', async (transport) => {
+    const requests: Record<string, unknown>[] = [];
+    const capture = async (req: { body?: string }) => { requests.push(JSON.parse(req.body!)); throw new Error('stop'); };
+    vi.mocked(httpFetch).mockImplementation(capture);
+    vi.mocked(httpStream).mockImplementation(capture);
+    for (const name of ['Jarvis', 'Nova']) {
+      useSettings.setState({ settings: { ...DEFAULT_SETTINGS, assistantName: name, hermes: { ...config, instructions: 'Tu es Eve. Réponds en français.' } } });
+      const send = useHermes.getState().client().send({ text: 'Qui es-tu ?', sessionId: 'hs:test', history: [], onEvent: vi.fn() }, transport);
+      await expect(send.result).rejects.toThrow('stop');
+      const body = requests.at(-1)!;
+      const instructions = transport === 'completions' ? (body.messages as { content: string }[])[0].content : body.instructions as string;
+      expect(instructions).toContain(`ton nom est "${name}"`);
+      expect(instructions).toContain('Réponds en français.');
+      expect(instructions).toContain("EveFlow est le nom de l'application, pas ton nom");
+    }
+    expect(useSettings.getState().settings.hermes.instructions).toBe('Tu es Eve. Réponds en français.');
+  });
   it('reads the real provider inventory, keeps providers distinct and marks inaccessible models', async () => {
     respond({ providers: [
       { slug: 'first', name: 'First', authenticated: true, models: ['same', 'locked'], unavailable_models: ['locked'] },
