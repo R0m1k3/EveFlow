@@ -33,6 +33,9 @@ export interface VoiceSettings extends SttConfig {
 export interface SpeechSettings extends TtsConfig {
   autoSpeak: boolean;
   speakIncoming: boolean;
+  /** Speak only the first sentences (and the closing question) of long replies; the full text stays on screen. */
+  summarizeReplies: boolean;
+  replySentences: number;
 }
 
 export interface WebhookSettings {
@@ -89,7 +92,7 @@ export const DEFAULT_SETTINGS: Settings = {
     transport: 'auto',
     reasoningEffort: '',
     instructions:
-      "Réponds en français, de façon concise et orale quand la question est simple; utilise le Markdown uniquement pour le contenu structuré (code, listes, tableaux). Les images doivent être des URL http(s) ou des fichiers du dossier partagé.",
+      "Réponds en français, de façon concise et orale quand la question est simple; si la réponse est longue, commence par une ou deux phrases qui en donnent l'essentiel, puis le détail. Tu es dans une conversation continue : tiens compte des échanges précédents sans redemander ce qui a déjà été dit. Utilise le Markdown uniquement pour le contenu structuré (code, listes, tableaux). Les images doivent être des URL http(s) ou des fichiers du dossier partagé.",
     localTools: true,
     missionModel: ''
   },
@@ -133,7 +136,9 @@ export const DEFAULT_SETTINGS: Settings = {
     voiceGender: 'male',
     timbre: 'jarvis',
     autoSpeak: true,
-    speakIncoming: true
+    speakIncoming: true,
+    summarizeReplies: true,
+    replySentences: 4
   },
   webhook: { enabled: true, port: 7842, secret: '' },
   notifications: { quietEnabled: false, quietStart: '22:30', quietEnd: '07:30', priorityKeywords: 'urgent, alerte, alarme, panne', summarizeIncoming: true, summarySentences: 2, nightTheme: true },

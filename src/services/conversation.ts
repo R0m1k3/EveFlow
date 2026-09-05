@@ -269,8 +269,8 @@ export async function sendMessage(text: string, images: string[] = [], source = 
     if (handle.aborted) {
       speech.discardStream();
     } else if (settings.speech.autoSpeak) {
-      if (!streamedText && finalText) speech.say(finalText);
-      else speech.endStream();
+      if (!streamedText && finalText) speech.sayReply(finalText);
+      else speech.endStream(finalText);
     } else {
       speech.discardStream();
     }

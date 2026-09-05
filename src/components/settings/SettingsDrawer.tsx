@@ -557,6 +557,13 @@ export function SettingsDrawer({ onClose }: Props) {
               </div>
             </div>
             <Toggle on={settings.speech.autoSpeak} onChange={(v) => update({ speech: { autoSpeak: v } })} label="Lire les réponses en streaming" hint="Chaque phrase est prononcée dès qu’elle est complète." />
+            <Toggle on={settings.speech.summarizeReplies} onChange={(v) => update({ speech: { summarizeReplies: v } })} label="Résumé vocal des réponses longues" hint="Seules les premières phrases et la question finale sont lues ; la réponse complète reste dans le fil." />
+            {settings.speech.summarizeReplies && (
+              <div className="field">
+                <label>Phrases lues : {settings.speech.replySentences}</label>
+                <input className="range" type="range" min={1} max={10} step={1} value={settings.speech.replySentences} onChange={(e) => update({ speech: { replySentences: Number(e.target.value) } })} />
+              </div>
+            )}
             <Toggle on={settings.speech.speakIncoming} onChange={(v) => update({ speech: { speakIncoming: v } })} label="Lire les messages entrants (webhook, crons)" />
             <div className="row" style={{ marginTop: 10 }}>
               <button className="btn small" onClick={testTts} disabled={settings.speech.provider === 'off'}><Volume2 size={13} /> Tester la voix</button>

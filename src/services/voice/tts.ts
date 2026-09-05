@@ -115,12 +115,14 @@ export class TtsEngine {
     if (rest) for (const chunk of chunkForSpeech(rest)) this.enqueue(chunk);
   }
 
-  enqueue(text: string): void {
+  /** Queue one chunk; false when nothing speakable remains once markdown and code are stripped. */
+  enqueue(text: string): boolean {
     const item = this.makeItem(text);
-    if (!item) return;
+    if (!item) return false;
     this.queue.push(item);
     this.fillPrefetch();
     void this.drain();
+    return true;
   }
 
   private makeItem(text: string): QueueItem | null {
