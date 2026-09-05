@@ -447,6 +447,7 @@ export class HermesClient {
     let finalText = '';
     let streamedText = '';
     let completed = false;
+    let sessionSeen = false;
     let failure: string | null = null;
 
     const handle = await this.streamRunEvents(runId, (event) => {
@@ -455,6 +456,7 @@ export class HermesClient {
         completed = true;
         finalText = event.text ?? '';
       }
+      if (event.kind === 'session') sessionSeen = true;
       if (event.kind === 'error') failure = event.message;
       onEvent(event);
     });
@@ -465,6 +467,9 @@ export class HermesClient {
     });
 
     await handle.done;
+    // The run events never carry the session id; only the run status does. Without adopting it,
+    // every message would start a fresh Hermes session and the conversation would lose its context.
+    if (!sessionSeen) await this.adoptRunSession(runId, onEvent);
     if (stopped || isAborted()) return streamedText;
     if (failure) throw new Error(failure);
 
@@ -483,6 +488,16 @@ export class HermesClient {
       }
     }
     return finalText || streamedText;
+  }
+
+  /** Reads the session Hermes actually attached to a run and reports it, so the next run continues it. */
+  private async adoptRunSession(runId: string, onEvent: SendOptions['onEvent']): Promise<void> {
+    try {
+      const info = await this.getRun(runId);
+      if (info.session_id) onEvent({ kind: 'session', sessionId: String(info.session_id) });
+    } catch (err) {
+      Log.warn('hermes', `run ${runId}: session id unavailable (${(err as Error).message})`);
+    }
   }
 
   private async sendViaSessions(options: SendOptions, setAbort: (fn: () => void) => void, isAborted: () => boolean): Promise<string> {

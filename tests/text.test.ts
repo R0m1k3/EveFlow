@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chunkForSpeech, cleanForSpeech, extractSentences, isTranscriptNoise, preprocessMedia } from '../src/lib/text';
+import { chunkForSpeech, cleanForSpeech, closingQuestion, extractSentences, isTranscriptNoise, preprocessMedia, spokenDigest } from '../src/lib/text';
 
 describe('text', () => {
   it('cleans markdown for speech', () => {
@@ -38,5 +38,23 @@ describe('isTranscriptNoise', () => {
     expect(isTranscriptNoise('Jarvis, allume la lumière du salon.')).toBe(false);
     expect(isTranscriptNoise('(Jarvis) quelle heure est-il maintenant ?')).toBe(false);
     expect(isTranscriptNoise('Oui')).toBe(false);
+  });
+});
+
+describe('spokenDigest', () => {
+  const reply = 'Voici la réponse. Elle contient plusieurs phrases. Une troisième pour la forme. Et une quatrième.\n\n```js\nconsole.log(1)\n```\n\nTu veux que je continue ?';
+  it('speaks the first sentences and keeps the closing question', () => {
+    const digest = spokenDigest(reply, 2);
+    expect(digest.truncated).toBe(true);
+    expect(digest.text).toBe('Voici la réponse. Elle contient plusieurs phrases. Tu veux que je continue ?');
+  });
+  it('leaves short replies untouched', () => {
+    const digest = spokenDigest('Bonjour Michael. Tout va bien.', 4);
+    expect(digest).toEqual({ text: 'Bonjour Michael. Tout va bien.', truncated: false });
+  });
+  it('ignores code blocks when counting and only reports a real question', () => {
+    expect(spokenDigest('Une phrase.\n\n```\ncode\n```\n', 1).truncated).toBe(false);
+    expect(closingQuestion(reply)).toBe('Tu veux que je continue ?');
+    expect(closingQuestion('Aucune question ici.')).toBeNull();
   });
 });

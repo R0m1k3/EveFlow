@@ -129,6 +129,33 @@ export function chunkForSpeech(text: string, maxLength = 220): string[] {
   return out;
 }
 
+/** Last speakable chunk of a reply when it is a question (« Tu veux que je… ? »), else null. */
+export function closingQuestion(text: string): string | null {
+  const parts = speakableChunks(text);
+  const last = parts[parts.length - 1];
+  return last && /\?\s*$/.test(last) ? last : null;
+}
+
+/** Chunks of the spoken form of a text (markdown and code already stripped), letters only. */
+function speakableChunks(text: string): string[] {
+  return chunkForSpeech(cleanForSpeech(text)).filter((part) => /[\p{L}\p{N}]/u.test(part));
+}
+
+/**
+ * Spoken digest of a long reply: the first `maxSentences` speakable chunks plus the closing
+ * question when there is one, so a long answer stays short to listen to but the conversation
+ * can go on. `truncated` tells the caller that the screen holds more than what is spoken.
+ */
+export function spokenDigest(text: string, maxSentences: number): { text: string; truncated: boolean } {
+  const parts = speakableChunks(text);
+  const limit = Math.max(1, Math.floor(maxSentences));
+  if (parts.length <= limit) return { text: parts.join(' '), truncated: false };
+  const head = parts.slice(0, limit);
+  const question = closingQuestion(text);
+  if (question && !head.includes(question)) head.push(question);
+  return { text: head.join(' '), truncated: true };
+}
+
 export function previewText(value: string, max = 96): string {
   const flat = value.replace(/\s+/g, ' ').trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
