@@ -16,6 +16,7 @@ import { useVoice } from '../../state/voice';
 import { installedModels, useVoiceModels } from '../../state/voiceModels';
 import { ModelsSection } from './ModelsSection';
 import { ModelSelect } from './ModelSelect';
+import { REASONING_EFFORTS, isReasoningEffort } from '../../lib/hermesReasoning';
 
 type Section = 'general' | 'hermes' | 'voice' | 'speech' | 'models' | 'webhook' | 'notifications' | 'ui';
 
@@ -244,12 +245,10 @@ export function SettingsDrawer({ onClose }: Props) {
                 </div>
                 <div className="field">
                   <label>Effort de raisonnement</label>
-                  <select className="select" value={settings.hermes.reasoningEffort} onChange={(e) => update({ hermes: { reasoningEffort: e.target.value as typeof settings.hermes.reasoningEffort } })}>
-                    <option value="">Défaut</option>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
+                  <select className="select" value={settings.hermes.reasoningEffort} onChange={(e) => { if (isReasoningEffort(e.target.value)) update({ hermes: { reasoningEffort: e.target.value } }); }}>
+                    {REASONING_EFFORTS.map((e) => <option key={e.value} value={e.value}>{e.label}</option>)}
                   </select>
+                  <span className="hint">Envoyé à chaque requête (runs, sessions, chat completions) dans model_options.reasoning_effort. Plus c’est haut, plus la réponse est réfléchie et lente.</span>
                 </div>
               </div>
               <div className="field">

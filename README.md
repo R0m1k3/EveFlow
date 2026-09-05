@@ -1,7 +1,7 @@
 # EveFlow 2 — Interface vocale JARVIS pour Hermes Agent
 
 [![Build](https://img.shields.io/github/actions/workflow/status/R0m1k3/EveFlow/windows-release.yml?style=flat-square)](https://github.com/R0m1k3/EveFlow/actions)
-[![Version](https://img.shields.io/badge/version-2.5.0-brightgreen.svg?style=flat-square)](https://github.com/R0m1k3/EveFlow/releases)
+[![Version](https://img.shields.io/badge/version-2.5.4-brightgreen.svg?style=flat-square)](https://github.com/R0m1k3/EveFlow/releases)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey.svg?style=flat-square)](LICENSE)
 
 **EveFlow** est un compagnon de bureau Windows qui transforme [Hermes Agent](https://hermes-agent.nousresearch.com/) en assistant vocal à la JARVIS : un noyau holographique réactif au son, une conversation en streaming, les outils, sous-agents, approbations, crons, skills et sessions d'Hermes pilotés depuis un seul HUD.
@@ -46,6 +46,7 @@ La version 2 est une réécriture complète : plus de robot 3D, un pipeline voca
   1. **Runs API** (`POST /v1/runs` + `GET /v1/runs/{id}/events`) : deltas, outils, sous-agents, `approval.request`, `run.completed`, arrêt (`/stop`) et injection de consignes en cours de run (`/steer`).
   2. **Sessions API** (`/api/sessions/{id}/chat/stream`) : mémoire côté serveur, fork, suppression, relecture de l'historique.
   3. **Chat completions** OpenAI (`/v1/chat/completions`) avec `hermes.tool.progress`, continuité de session (`X-Hermes-Session-Id`) et outils EveFlow côté client (état du HUD, fichiers partagés, notifications).
+* **Effort de raisonnement** : les huit niveaux d'Hermes (none, minimal, low, medium, high, xhigh, max, ultra) au choix dans Paramètres → Hermes, envoyés dans `model_options.reasoning_effort` sur les trois transports (runs, sessions, chat completions).
 * Mémoire longue durée via `X-Hermes-Session-Key`.
 * **Approbations** d'outils affichées dans le HUD : une fois, pour la session, toujours, refuser.
 * **Crons** : création en langage naturel (`every 1h`, `weekdays at 9am`, `in 30m`, expression cron), pause/reprise, exécution immédiate, édition, historique des résultats lus à voix haute.

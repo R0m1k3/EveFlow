@@ -1,5 +1,8 @@
 export type HermesTransport = 'auto' | 'runs' | 'sessions' | 'completions';
 
+/** Thinking depth accepted by Hermes (`model_options.reasoning_effort`); empty = server default (medium). */
+export type HermesReasoningEffort = '' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
+
 export interface HermesConfig {
   url: string;
   apiKey: string;
@@ -7,7 +10,7 @@ export interface HermesConfig {
   /** Stable per-user key for long-term memory (X-Hermes-Session-Key). */
   sessionKey: string;
   transport: HermesTransport;
-  reasoningEffort: '' | 'low' | 'medium' | 'high';
+  reasoningEffort: HermesReasoningEffort;
   /** Extra instructions layered on top of the Hermes system prompt. */
   instructions: string;
   /** Model used in "mission" mode (long tasks); empty = same as `model`. */
