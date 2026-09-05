@@ -81,6 +81,7 @@ export function SettingsDrawer({ onClose }: Props) {
   const hermesModels = useHermes((s) => s.models);
   const modelsLoading = useHermes((s) => s.modelsLoading);
   const modelsError = useHermes((s) => s.modelsError);
+  const modelsNotice = useHermes((s) => s.modelsNotice);
   const refreshHermesModels = useHermes((s) => s.refreshModels);
   const hermesWebhook = useHermes((s) => s.webhook);
   const hermesConnect = useHermes((s) => s.connect);
@@ -224,12 +225,12 @@ export function SettingsDrawer({ onClose }: Props) {
                 </div>
               </div>
               <div className="field">
-                <button className="btn small" disabled={modelsLoading} onClick={() => void refreshHermesModels()}>
+                <button className="btn small" disabled={modelsLoading} onClick={() => void refreshHermesModels(true)}>
                   {modelsLoading ? <Loader2 size={13} className="spin" /> : <RotateCcw size={13} />}
                   {modelsLoading ? 'Chargement des modèles…' : 'Actualiser les modèles'}
                 </button>
                 <span className="hint" role="status">{modelsLoading ? 'Interrogation du serveur Hermes…' : modelsError || (hermesModels.length ? `${hermesModels.length} modèle(s) disponible(s).` : 'Aucun modèle annoncé par le serveur.')}</span>
-                <span className="hint">Cette liste contient les modèles exposés par votre serveur Hermes. Si seul « hermes-agent » apparaît, les autres modèles doivent être configurés et exposés côté serveur.</span>
+                <span className={modelsNotice ? 'test-result fail' : 'hint'}>{modelsNotice || 'Modèles des fournisseurs configurés dans Hermes. Les modèles sans accès sont indiqués comme indisponibles.'}</span>
               </div>
               <div className="grid-2">
                 <div className="field">

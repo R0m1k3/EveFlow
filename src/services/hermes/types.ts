@@ -35,6 +35,8 @@ export interface HermesHealth {
 
 export interface HermesModel {
   id: string;
+  name?: string;
+  available?: boolean;
   owned_by?: string;
   provider?: string;
   [key: string]: unknown;
