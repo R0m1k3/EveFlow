@@ -35,7 +35,8 @@ interface HermesStore {
   models: HermesModel[];
   modelsLoading: boolean;
   modelsError: string | null;
-  refreshModels: () => Promise<void>;
+  modelsNotice: string | null;
+  refreshModels: (refresh?: boolean) => Promise<void>;
   skills: HermesSkill[];
   toolsets: HermesToolset[];
   sessions: HermesSession[];
@@ -93,6 +94,7 @@ export const useHermes = create<HermesStore>((set, get) => ({
   models: [],
   modelsLoading: false,
   modelsError: null,
+  modelsNotice: null,
   skills: [],
   toolsets: [],
   sessions: [],
@@ -108,7 +110,7 @@ export const useHermes = create<HermesStore>((set, get) => ({
   client: (modelOverride) => {
     const config = useSettings.getState().settings.hermes;
     // Without an explicit model, use the alias advertised by /v1/models (Hermes rejects unknown names).
-    const model = (modelOverride ?? '').trim() || config.model.trim() || get().models[0]?.id || '';
+    const model = (modelOverride ?? '').trim() || config.model.trim();
     return new HermesClient({ ...config, model });
   },
 
@@ -166,17 +168,17 @@ export const useHermes = create<HermesStore>((set, get) => ({
     return connectInflight;
   },
 
-  refreshModels: async () => {
+  refreshModels: async (refresh = false) => {
     const request = ++modelsRequest;
     const config = useSettings.getState().settings.hermes;
     const current = () => {
       const now = useSettings.getState().settings.hermes;
       return request === modelsRequest && now.url === config.url && now.apiKey === config.apiKey && now.sessionKey === config.sessionKey;
     };
-    set({ models: [], modelsLoading: true, modelsError: null });
+    set({ models: [], modelsLoading: true, modelsError: null, modelsNotice: null });
     try {
-      const models = await new HermesClient(config).models();
-      if (current()) set({ models });
+      const { models, notice } = await new HermesClient(config).modelCatalog(refresh);
+      if (current()) set({ models, modelsNotice: notice });
     } catch (err) {
       if (current()) set({ modelsError: (err as Error).message });
     } finally {

@@ -31,6 +31,13 @@ const isRec = (v: unknown): v is Rec => !!v && typeof v === 'object' && !Array.i
 
 export type ResolvedTransport = Exclude<HermesTransport, 'auto'>;
 
+/** Stored picker IDs include the provider so identical model names remain distinct. */
+export function modelSelection(value: string): { model?: string; provider?: string } {
+  const id = value.trim();
+  const separator = id.indexOf('::');
+  return separator > 0 ? { provider: id.slice(0, separator), model: id.slice(separator + 2) } : id ? { model: id } : {};
+}
+
 /**
  * A web page (login portal, dashboard, reverse-proxy error) instead of JSON means the URL does not
  * point at the Hermes API. Returns a human explanation, or null when the body is not HTML.
@@ -217,6 +224,29 @@ export class HermesClient {
     return [...models.values()];
   }
 
+  async modelCatalog(refresh = false): Promise<{ models: HermesModel[]; notice: string | null }> {
+    let payload: unknown;
+    try {
+      payload = await this.request<unknown>(`/api/model/options${refresh ? '?refresh=true' : ''}`, { timeoutMs: 30_000 });
+    } catch (err) {
+      if (!(err instanceof HttpError) || ![404, 405].includes(err.status)) throw err;
+      return { models: await this.models(), notice: 'Ce serveur ne propose pas le catalogue IA (/api/model/options). Mettez Hermes à jour pour choisir le fournisseur et son modèle. La liste ci-dessous contient uniquement les alias de connexion.' };
+    }
+    if (!isRec(payload) || !Array.isArray(payload.providers)) throw new Error('Catalogue IA Hermes invalide : liste des fournisseurs absente.');
+    const models = new Map<string, HermesModel>();
+    for (const row of payload.providers) {
+      if (!isRec(row) || typeof row.slug !== 'string' || !row.slug.trim() || !Array.isArray(row.models)) continue;
+      const unavailable = Array.isArray(row.unavailable_models) ? row.unavailable_models : [];
+      for (const model of row.models) {
+        if (typeof model !== 'string' || !model.trim()) continue;
+        const id = `${row.slug}::${model}`;
+        models.set(id, { id, name: model, provider: typeof row.name === 'string' ? row.name : row.slug,
+          available: row.authenticated !== false && !unavailable.includes(model) });
+      }
+    }
+    return { models: [...models.values()], notice: null };
+  }
+
   async skills(): Promise<HermesSkill[]> {
     const payload = await this.request<unknown>('/v1/skills');
     return extractArray<HermesSkill>(payload, ['skills', 'data', 'items']);
@@ -304,11 +334,12 @@ export class HermesClient {
 
   // ── Runs ──────────────────────────────────────────────────────────────────
 
-  async startRun(body: { input: string; session_id?: string; instructions?: string; model?: string }): Promise<{ run_id: string; status: string }> {
+  async startRun(body: { input: string; session_id?: string; instructions?: string; model?: string; provider?: string }): Promise<{ run_id: string; status: string }> {
     const payload: Rec = { input: body.input };
     if (body.session_id) payload.session_id = body.session_id;
     if (body.instructions) payload.instructions = body.instructions;
     if (body.model) payload.model = body.model;
+    if (body.provider) payload.provider = body.provider;
     return this.request<{ run_id: string; status: string }>('/v1/runs', { method: 'POST', body: payload, timeoutMs: 30_000 });
   }
 
@@ -402,7 +433,7 @@ export class HermesClient {
       input: options.text,
       session_id: plainSession(options.sessionId) || undefined,
       instructions: this.config.instructions || undefined,
-      model: this.config.model || undefined
+      ...modelSelection(this.config.model)
     });
     const runId = run.run_id;
     if (isAborted()) {
@@ -466,7 +497,7 @@ export class HermesClient {
     const realId = sessionId.slice(3);
     const body: Rec = { input: options.text };
     if (this.config.instructions) body.instructions = this.config.instructions;
-    if (this.config.model) body.model = this.config.model;
+    Object.assign(body, modelSelection(this.config.model));
 
     let streamed = '';
     let finalText = '';
@@ -503,7 +534,7 @@ export class HermesClient {
     let fullText = '';
     let toolsAllowed = useTools;
     for (let iteration = 0; iteration < 6 && !aborted(); iteration++) {
-      const payload: Rec = { model: this.config.model || 'hermes-agent', messages, stream: true };
+      const payload: Rec = { model: 'hermes-agent', ...modelSelection(this.config.model), messages, stream: true };
       if (toolsAllowed) {
         payload.tools = options.localToolDefinitions;
         payload.tool_choice = 'auto';

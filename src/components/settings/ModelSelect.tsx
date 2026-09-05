@@ -15,7 +15,7 @@ export function ModelSelect({ label, value, models, defaultLabel, onChange }: {
     <select id={id} className="select" value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">{defaultLabel}</option>
       {value && !models.some((m) => m.id === value) && <option value={value}>{value} (configuré)</option>}
-      {models.map((m) => <option key={m.id} value={m.id}>{m.id}{m.provider || m.owned_by ? ` · ${m.provider || m.owned_by}` : ''}</option>)}
+      {models.map((m) => <option key={m.id} value={m.id} disabled={m.available === false}>{m.name || m.id}{m.provider || m.owned_by ? ` · ${m.provider || m.owned_by}` : ''}{m.available === false ? ' (indisponible)' : ''}</option>)}
     </select>
     <button type="button" className="btn small" aria-expanded={manual} onClick={() => setManual(!manual)}>
       {manual ? 'Masquer la saisie manuelle' : 'Saisir un autre identifiant'}

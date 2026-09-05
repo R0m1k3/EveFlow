@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HermesClient } from '../src/services/hermes/client';
-import { httpFetch } from '../src/lib/transport';
+import { httpFetch, httpStream } from '../src/lib/transport';
 import { DEFAULT_SETTINGS, useSettings } from '../src/state/settings';
 import { useHermes } from '../src/state/hermes';
 import { createElement, act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ModelSelect } from '../src/components/settings/ModelSelect';
 
-vi.mock('../src/lib/transport', async (original) => ({ ...await original<typeof import('../src/lib/transport')>(), httpFetch: vi.fn() }));
+vi.mock('../src/lib/transport', async (original) => ({ ...await original<typeof import('../src/lib/transport')>(), httpFetch: vi.fn(), httpStream: vi.fn() }));
 const config = { ...DEFAULT_SETTINGS.hermes, url: 'https://example.test/v1/', apiKey: ' test-key ' };
 function respond(payload: unknown, status = 200) {
   vi.mocked(httpFetch).mockResolvedValue({ ok: status === 200, status, statusText: '', headers: {}, text: JSON.stringify(payload) });
@@ -15,6 +15,37 @@ function respond(payload: unknown, status = 200) {
 afterEach(() => { vi.restoreAllMocks(); useSettings.setState({ settings: DEFAULT_SETTINGS }); });
 
 describe('Hermes models', () => {
+  it('reads the real provider inventory, keeps providers distinct and marks inaccessible models', async () => {
+    respond({ providers: [
+      { slug: 'first', name: 'First', authenticated: true, models: ['same', 'locked'], unavailable_models: ['locked'] },
+      { slug: 'second', name: 'Second', authenticated: false, models: ['same'] }
+    ] });
+    const result = await new HermesClient(config).modelCatalog(true);
+    expect(httpFetch).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://example.test/api/model/options?refresh=true' }));
+    expect(result.models.map(m => [m.id, m.available])).toEqual([['first::same', true], ['first::locked', false], ['second::same', false]]);
+    expect(result.notice).toBeNull();
+  });
+  it('explains old servers instead of presenting the connection alias as an LLM catalog', async () => {
+    vi.mocked(httpFetch).mockResolvedValueOnce({ ok: false, status: 404, statusText: '', headers: {}, text: '' })
+      .mockResolvedValueOnce({ ok: true, status: 200, statusText: '', headers: {}, text: JSON.stringify({ data: [{ id: 'hermes-agent' }] }) });
+    const result = await new HermesClient(config).modelCatalog();
+    expect(result.models).toEqual([{ id: 'hermes-agent' }]);
+    expect(result.notice).toContain('Mettez Hermes à jour');
+  });
+  it.each(['runs', 'sessions', 'completions'] as const)('sends provider and actual model separately over %s', async (transport) => {
+    const requests: unknown[] = [];
+    vi.mocked(httpFetch).mockImplementation(async req => {
+      requests.push(JSON.parse(req.body as string));
+      throw new Error('stop');
+    });
+    vi.mocked(httpStream).mockImplementation(async req => {
+      requests.push(JSON.parse(req.body as string));
+      throw new Error('stop');
+    });
+    const send = new HermesClient({ ...config, model: 'custom:local::real-model' }).send({ text: 'Bonjour', sessionId: 'hs:test', history: [], onEvent: vi.fn() }, transport);
+    await expect(send.result).rejects.toThrow('stop');
+    expect(requests[0]).toMatchObject({ model: 'real-model', provider: 'custom:local' });
+  });
   it('uses authenticated discovery and preserves provider labels, order and unique valid IDs', async () => {
     respond({ data: [{ id: 'b', provider: 'provider-b' }, { id: 'a' }, { id: 'b' }, {}, ' c '] });
     expect(await new HermesClient(config).models()).toEqual([{ id: 'b', provider: 'provider-b' }, { id: 'a' }, { id: 'c' }]);
@@ -38,12 +69,12 @@ describe('Hermes models', () => {
   });
   it('discards results from a previous server or an older refresh', async () => {
     useSettings.setState({ settings: { ...DEFAULT_SETTINGS, hermes: config } });
-    let finish!: (value: { id: string }[]) => void;
-    vi.spyOn(HermesClient.prototype, 'models').mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValue([{ id: 'new' }]);
+    let finish!: (value: { models: { id: string }[]; notice: null }) => void;
+    vi.spyOn(HermesClient.prototype, 'modelCatalog').mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValue({ models: [{ id: 'new' }], notice: null });
     const old = useHermes.getState().refreshModels();
     useSettings.setState({ settings: { ...DEFAULT_SETTINGS, hermes: { ...config, url: 'https://new.test' } } });
     await useHermes.getState().refreshModels();
-    finish([{ id: 'old' }]);
+    finish({ models: [{ id: 'old' }], notice: null });
     await old;
     expect(useHermes.getState().models).toEqual([{ id: 'new' }]);
   });
