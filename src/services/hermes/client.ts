@@ -160,6 +160,11 @@ export class HermesClient {
     return hermesBaseUrl(this.config.url);
   }
 
+  /** `model_options.reasoning_effort`, accepted by runs, session chat and chat completions alike. */
+  private reasoningOptions(): Rec {
+    return this.config.reasoningEffort ? { model_options: { reasoning_effort: this.config.reasoningEffort } } : {};
+  }
+
   private headers(extra: Record<string, string> = {}, json = true): Record<string, string> {
     const h: Record<string, string> = { ...extra };
     if (json) h['Content-Type'] = 'application/json';
@@ -335,7 +340,7 @@ export class HermesClient {
   // ── Runs ──────────────────────────────────────────────────────────────────
 
   async startRun(body: { input: string; session_id?: string; instructions?: string; model?: string; provider?: string }): Promise<{ run_id: string; status: string }> {
-    const payload: Rec = { input: body.input };
+    const payload: Rec = { input: body.input, ...this.reasoningOptions() };
     if (body.session_id) payload.session_id = body.session_id;
     if (body.instructions) payload.instructions = body.instructions;
     if (body.model) payload.model = body.model;
@@ -495,7 +500,7 @@ export class HermesClient {
     }
     if (isAborted()) return '';
     const realId = sessionId.slice(3);
-    const body: Rec = { input: options.text };
+    const body: Rec = { input: options.text, ...this.reasoningOptions() };
     if (this.config.instructions) body.instructions = this.config.instructions;
     Object.assign(body, modelSelection(this.config.model));
 
@@ -539,7 +544,7 @@ export class HermesClient {
         payload.tools = options.localToolDefinitions;
         payload.tool_choice = 'auto';
       }
-      if (this.config.reasoningEffort) payload.model_options = { reasoning_effort: this.config.reasoningEffort };
+      Object.assign(payload, this.reasoningOptions());
 
       const toolCalls = new Map<number, CompletionToolCallAccumulator>();
       let finishReason: string | null = null;
