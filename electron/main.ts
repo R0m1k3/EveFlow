@@ -1,8 +1,9 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, session, systemPreferences, Tray } from 'electron';
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { IPC, type AppInfo, type HotkeyEvent, type LogEntry, type WindowMode } from '../shared/ipc';
 import { getLogPath, log, writeLog } from './logger';
-import { flushStore, registerStoreIpc, storeGet } from './ipc/store';
+import { flushStore, registerStoreIpc, storeGet, storeSet } from './ipc/store';
 import { abortAllStreams, registerHttpIpc } from './ipc/http';
 import { registerTelemetryIpc } from './ipc/telemetry';
 import { getSharedDirectory, registerFilesIpc } from './ipc/files';
@@ -37,21 +38,61 @@ interface WebhookSettings {
   enabled?: boolean;
   port?: number;
   secret?: string;
+  /** Listen on every interface (LAN Hermes) instead of loopback only. */
+  remote?: boolean;
+}
+
+const UI_SETTINGS_KEY = 'eveflow.settings.v2';
+
+/** Mirror webhook fields into the renderer settings so the Settings drawer shows them. */
+function patchUiWebhookSettings(patch: Partial<WebhookSettings>): void {
+  const ui = storeGet<{ webhook?: WebhookSettings }>(UI_SETTINGS_KEY);
+  if (ui && typeof ui === 'object') storeSet(UI_SETTINGS_KEY, { ...ui, webhook: { ...(ui.webhook ?? {}), ...patch } });
+}
+
+/**
+ * The webhook / MCP server always requires a secret: generate a random one when none is set
+ * (first run, or secret cleared in the settings) and persist it.
+ */
+function ensureWebhookSecret(): void {
+  const saved = storeGet<WebhookSettings>('webhook') ?? {};
+  if (typeof saved.secret === 'string' && saved.secret) {
+    // Before the "remote" option, a configured secret meant listening on the LAN: keep that behaviour.
+    if (saved.remote === undefined) {
+      storeSet('webhook', { ...saved, remote: true });
+      patchUiWebhookSettings({ remote: true });
+    }
+    return;
+  }
+  const secret = randomBytes(24).toString('base64url');
+  storeSet('webhook', { ...saved, secret, remote: saved.remote ?? false });
+  patchUiWebhookSettings({ secret, remote: saved.remote ?? false });
+  log('INFO', 'webhook', 'generated a random webhook/MCP secret (see Settings → Webhook)');
 }
 
 function readWebhookSettings(): WebhookSettings {
   const saved = storeGet<WebhookSettings>('webhook') ?? {};
   const port = Number(saved.port);
-  return { enabled: saved.enabled !== false, port: Number.isInteger(port) && port > 0 && port < 65536 ? port : 7842, secret: typeof saved.secret === 'string' ? saved.secret : '' };
+  return {
+    enabled: saved.enabled !== false,
+    port: Number.isInteger(port) && port > 0 && port < 65536 ? port : 7842,
+    secret: typeof saved.secret === 'string' ? saved.secret : '',
+    remote: saved.remote === true
+  };
 }
 
 async function bootWebhook(): Promise<void> {
+  ensureWebhookSecret();
   const settings = readWebhookSettings();
   if (settings.enabled === false) {
     await stopWebhookServer();
     return;
   }
-  await startWebhookServer(getMainWindow, { port: settings.port ?? 7842, secret: settings.secret || undefined });
+  await startWebhookServer(getMainWindow, {
+    port: settings.port ?? 7842,
+    secret: settings.secret || undefined,
+    host: settings.remote ? '0.0.0.0' : '127.0.0.1'
+  });
 }
 
 function sendHotkey(event: HotkeyEvent): void {
@@ -155,6 +196,8 @@ async function boot(): Promise<void> {
   log('INFO', 'app', `EveFlow ${app.getVersion()} starting (electron ${process.versions.electron}, chrome ${process.versions.chrome})`);
   configureSession();
   registerStoreIpc();
+  // Before the renderer loads its settings, so it sees the generated secret.
+  ensureWebhookSecret();
   registerHttpIpc();
   registerTelemetryIpc();
   registerFilesIpc();

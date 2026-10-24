@@ -51,7 +51,7 @@ La version 2 est une réécriture complète : plus de robot 3D, un pipeline voca
 * **Approbations** d'outils affichées dans le HUD : une fois, pour la session, toujours, refuser.
 * **Crons** : création en langage naturel (`every 1h`, `weekdays at 9am`, `in 30m`, expression cron), pause/reprise, exécution immédiate, édition, historique des résultats lus à voix haute.
 * **Skills et toolsets** exposés par le serveur, **sessions** navigables.
-* **Webhook local** (`POST http://<pc>:7842/eveflow/hook`) pour recevoir les livraisons de crons, le miroir Telegram ou n'importe quel script, avec secret optionnel.
+* **Webhook local** (`POST http://<pc>:7842/eveflow/hook`) pour recevoir les livraisons de crons, le miroir Telegram ou n'importe quel script, protégé par un secret (généré automatiquement au premier lancement, visible dans Paramètres → Webhook).
 * Images inline (URL, data URL, fichiers du dossier partagé `Documents/EveFlow_Shared`).
 
 ### Système
@@ -93,7 +93,7 @@ API_SERVER_KEY=<votre clé>
 
 Puis lancez `hermes gateway`. Renseignez l'URL (`http://<hôte>:8642`) et la clé dans **Paramètres → Hermes** et cliquez **Tester la liaison**. Le transport choisi apparaît dans la barre supérieure.
 
-Pour recevoir les résultats de crons ou le miroir d'autres canaux dans EveFlow, faites pointer une livraison Hermes (script, webhook, `deliver`) vers `http://<ip-du-pc>:7842/eveflow/hook` avec un JSON tel que :
+Pour recevoir les résultats de crons ou le miroir d'autres canaux dans EveFlow, faites pointer une livraison Hermes (script, webhook, `deliver`) vers `http://<ip-du-pc>:7842/eveflow/hook` avec l'en-tête `X-EveFlow-Secret: <secret>` et un JSON (`Content-Type: application/json`) tel que :
 
 ```json
 { "role": "assistant", "text": "Rapport terminé", "source": "telegram" }
@@ -115,7 +115,7 @@ mcp_servers:
       Authorization: "Bearer <secret du webhook EveFlow>"
 ```
 
-Sans secret, EveFlow n'écoute qu'en local (`127.0.0.1`) ; définissez un secret dans Paramètres → Webhook pour un Hermes distant. Outils exposés : `capture_screen`, `lock_session`, `open_app`, `open_url`, `media_key`, `clipboard_get`, `clipboard_set`, `find_files`, `speak_text`, `notify_user`, `set_hud_state`, `get_app_status`, `get_conversation_history`, `show_message`.
+Le secret est **obligatoire** (en-tête `X-EveFlow-Secret` ou `Authorization: Bearer`) : EveFlow en génère un aléatoire s'il est vide (Paramètres → Webhook). Par défaut EveFlow n'écoute qu'en local (`127.0.0.1`) ; activez « Accepter les connexions du réseau local » pour un Hermes distant. Les requêtes doivent être envoyées en `Content-Type: application/json` ; celles qui portent un en-tête `Origin` (navigateurs) ou, en mode local, un `Host` autre que `127.0.0.1`/`localhost` sont refusées. Outils exposés : `capture_screen`, `lock_session`, `open_app`, `open_url`, `media_key`, `clipboard_get`, `clipboard_set`, `find_files`, `speak_text`, `notify_user`, `set_hud_state`, `get_app_status`, `get_conversation_history`, `show_message`.
 
 ### L'URL répond par une page web ?
 

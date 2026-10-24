@@ -41,7 +41,10 @@ export interface SpeechSettings extends TtsConfig {
 export interface WebhookSettings {
   enabled: boolean;
   port: number;
+  /** Required on every hook / MCP call; generated randomly by the main process when empty. */
   secret: string;
+  /** Accept connections from the local network (otherwise 127.0.0.1 only). */
+  remote: boolean;
 }
 
 export interface NotificationSettings {
@@ -140,7 +143,7 @@ export const DEFAULT_SETTINGS: Settings = {
     summarizeReplies: true,
     replySentences: 4
   },
-  webhook: { enabled: true, port: 7842, secret: '' },
+  webhook: { enabled: true, port: 7842, secret: '', remote: false },
   notifications: { quietEnabled: false, quietStart: '22:30', quietEnd: '07:30', priorityKeywords: 'urgent, alerte, alarme, panne', summarizeIncoming: true, summarySentences: 2, nightTheme: true },
   ui: { showTelemetry: true, showReasoning: false, reduceMotion: false, compactOpacity: 0.92 },
   hermesSessionId: ''
@@ -220,6 +223,12 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       }
     }
     const merged = merge(DEFAULT_SETTINGS, saved);
+    // The main process generates the webhook secret: pick it up when the UI settings lack it.
+    if (!merged.webhook.secret) {
+      const hook = await persistGet<Partial<WebhookSettings>>('webhook');
+      if (hook && typeof hook.secret === 'string') merged.webhook.secret = hook.secret;
+      if (hook && typeof hook.remote === 'boolean') merged.webhook.remote = hook.remote;
+    }
     if (!merged.hermesSessionId) merged.hermesSessionId = uid('eveflow');
     if (saved && saved.voice && saved.voice.wakeMode === undefined && saved.voice.wakeWordEnabled) merged.voice.wakeMode = 'transcript';
     set({ settings: merged, loaded: true });

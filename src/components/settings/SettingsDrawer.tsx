@@ -178,6 +178,9 @@ export function SettingsDrawer({ onClose }: Props) {
     await api.store.set('webhook', settings.webhook);
     const status = await api.hermes.webhookRestart();
     useHermes.setState({ webhook: status });
+    // An empty secret is replaced by a generated one: show it.
+    const saved = await api.store.get<{ secret?: string }>('webhook');
+    if (saved?.secret && saved.secret !== settings.webhook.secret) update({ webhook: { secret: saved.secret } });
   };
 
   const nav: Array<[Section, string]> = [
@@ -577,6 +580,7 @@ export function SettingsDrawer({ onClose }: Props) {
         {section === 'webhook' && (
           <div className="card">
             <Toggle on={settings.webhook.enabled} onChange={(v) => update({ webhook: { enabled: v } })} label="Serveur webhook local" hint="Hermes (crons, gateway, scripts) peut pousser des messages vers EveFlow." />
+            <Toggle on={settings.webhook.remote} onChange={(v) => update({ webhook: { remote: v } })} label="Accepter les connexions du réseau local" hint="Désactivé : écoute uniquement sur 127.0.0.1. À activer pour un Hermes installé sur une autre machine." />
             <div className="grid-2">
               <div className="field">
                 <label>Port</label>
@@ -593,7 +597,8 @@ export function SettingsDrawer({ onClose }: Props) {
             <div className="field">
               <label>Exemple d’appel</label>
               <pre className="input" style={{ whiteSpace: 'pre-wrap', fontSize: 11.5, userSelect: 'text' }}>{`curl -X POST http://<ip-de-ce-pc>:${settings.webhook.port}/eveflow/hook \\
-  -H "Content-Type: application/json"${settings.webhook.secret ? ' \\\n  -H "X-EveFlow-Secret: ***"' : ''} \\
+  -H "Content-Type: application/json" \\
+  -H "X-EveFlow-Secret: ***" \\
   -d '{"role":"assistant","text":"Rapport terminé","source":"telegram"}'`}</pre>
               <span className="hint">Formats acceptés : {'{role,text}'}, {'{event:"run.completed",input,output}'}, {'{event:"job.completed",job:{name},output,status}'}, {'{type:"message",payload:{text}}'}.</span>
             </div>
@@ -602,8 +607,10 @@ export function SettingsDrawer({ onClose }: Props) {
               <pre className="input" style={{ whiteSpace: 'pre-wrap', fontSize: 11.5, userSelect: 'text' }}>{`# ~/.hermes/config.yaml côté Hermes
 mcp_servers:
   eveflow:
-    url: "http://<ip-de-ce-pc>:${settings.webhook.port}/mcp"${settings.webhook.secret ? '\n    headers:\n      Authorization: "Bearer <secret>"' : ''}`}</pre>
-              <span className="hint">Même port et même secret que le webhook. Sans secret, EveFlow n’écoute qu’en local (127.0.0.1) : définissez un secret pour un Hermes distant.</span>
+    url: "http://<ip-de-ce-pc>:${settings.webhook.port}/mcp"
+    headers:
+      Authorization: "Bearer <secret>"`}</pre>
+              <span className="hint">Même port et même secret que le webhook. Le secret est obligatoire (généré automatiquement s’il est vide) ; les requêtes doivent être en JSON (Content-Type: application/json) et ne pas venir d’un navigateur.</span>
             </div>
             <div className="row">
               <button className="btn primary small" onClick={() => void applyWebhook()} disabled={!bridge()}>Appliquer et redémarrer</button>
